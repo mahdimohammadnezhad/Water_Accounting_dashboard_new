@@ -1,0 +1,169 @@
+# =============================================================================
+# فقط برای آزمون: همان ورودی‌های اکسل نمونه (water_acounting_1Sep25) را به موتور پایتون می‌دهد تا
+# با validate_excel.py نشان دهیم محاسبات سلول به سلول با شیت DYNMIC یکی است.
+# داشبورد از این فایل استفاده نمی‌کند (پیکربندی اصلی: configs/mashhad.yaml).
+# =============================================================================
+
+basin:
+  key: mashhad_excel_check
+  name: آزمون مطابقت با اکسل نمونه
+  base_dir: ../..            # پوشه داده‌ها نسبت به همین فایل (D:\Term2\WERI\Water_Accounting)
+  crs: EPSG:32640            # سیستم مختصات کاری (UTM 40N)
+
+spatial:
+  sub_basins:
+    shapefile: shape/final_boundary_fixed.shp
+    id_field: layer
+  counties:
+    shapefile: shape/shahrestan.shp
+    name_field: PER_NAM
+    fix_encoding: cp1256      # نام‌ها در این شیپ‌فایل با انکدینگ خراب ذخیره شده‌اند
+  snap_distance_m: 5000       # چاه/سد بیرون از مرز تا این فاصله به نزدیک‌ترین پلیگون نسبت داده می‌شود
+  sub_basin_label: "زیرحوضه {id}"
+  river_reach_label: "بازه رودخانه {id}"
+  aquifer_label: "آبخوان زیرحوضه {id}"
+
+# مبنای پیش‌فرض شهرستان: attribute = ستون شهرستان در آمار (مثل اکسل؛ شامل طرقبه-شاندیز و گلبهار)
+#                         geo       = شیپ‌فایل شهرستان‌ها (فعلاً ۷ شهرستان قدیمی)
+county_mode_default: attribute
+
+# -----------------------------------------------------------------------------
+# کاربری‌ها و قاعده آب برگشتی
+#   return_coef     ضریب برگشت (برگشت کل = ضریب × مجموع برداشت گروه)
+#   river_fraction  سهم برگشت که به بازه رودخانه می‌رود؛ باقی به آبخوان
+#   return_group    county: برگشت هر شهرستان یکجا حساب و بین زیرحوضه‌ها به نسبت برداشت زیرزمینی پخش می‌شود
+#                   sub_basin: برگشت هر زیرحوضه در همان زیرحوضه
+#   breakdown       تفکیک ستون‌ها در «قالب اکسل»: county | sub_basin | none
+#   members         شهرستان‌هایی که در قالب اکسل ستون دارند
+#   treatment_fraction  سهمی از برگشت که خروجی تصفیه‌خانه گزارش می‌شود (فقط شرب مشهد)
+# توجه: ضرایب صنعت (0.15) و خدمات (0.7) عیناً از شیت DYNMIC آمده‌اند؛ در شیت withdrawal و
+#       سیمای آب برعکس است (صنعت 0.7، خدمات 0.15). در صورت نیاز اینجا یا از داخل داشبورد اصلاح کنید.
+# -----------------------------------------------------------------------------
+uses:
+  - name: شرب
+    return_coef: 0.7
+    river_fraction: 0.5
+    return_group: county
+    breakdown: county
+    members: [مشهد, چناران, طرقبه-شاندیز, گلبهار, قوچان]
+    treatment_fraction: {مشهد: 0.5}
+  - name: فضای سبز مشهد
+    return_coef: 0.15
+    river_fraction: 0
+    return_group: county
+    breakdown: none
+  - name: شرب روستایی
+    return_coef: 0.15
+    river_fraction: 0.5
+    return_group: sub_basin
+    breakdown: sub_basin
+  - name: کشاورزی
+    return_coef: 0.15
+    river_fraction: 0
+    return_group: sub_basin
+    breakdown: sub_basin
+  - name: صنعتی
+    return_coef: 0.15
+    river_fraction: 0.5
+    return_group: county
+    breakdown: county
+    members: [مشهد, چناران, طرقبه-شاندیز, گلبهار, قوچان]
+  - name: خدمات
+    return_coef: 0.7
+    river_fraction: 0.5
+    return_group: sub_basin
+    breakdown: sub_basin
+
+# برگشتی رودخانه‌ای کاربری‌های شهرستانی به کدام بازه می‌رود (مثلاً نصف برگشت شرب مشهد -> بازه 4)
+# شهرستانی که اینجا نیست به زیرحوضه‌ای می‌رود که بیشترین برداشت را در آن دارد.
+county_outlet_reach:
+  مشهد: 4
+  چناران: 2
+  طرقبه-شاندیز: 3
+  گلبهار: 3
+  قوچان: 1
+
+# منابعی که در «کنترل بیلان» جمع می‌شوند (تصفیه‌خانه و بازه‌ها جزو آن نیستند، مانند اکسل)
+balance_source_groups: [dam, gw, transfer]
+treatment_label: تصفیه خانه
+
+# -----------------------------------------------------------------------------
+# آمار چاه‌ها
+# -----------------------------------------------------------------------------
+wells:
+  file: CHAH_MASHAHD.xls
+  sheet: 0
+  columns: {year: سال آبي, county: شهرستان, x: MA_XUTM, y: MA_YUTM, use: نوع مصرف, value: برداشت واقعي}
+  value_factor: 0.000001      # مترمکعب -> میلیون مترمکعب
+  use_map:
+    کشاورزی: کشاورزی
+    دام و طیور: کشاورزی
+    صنعتی: صنعتی
+    خدمات: خدمات
+    شرب شهری: شرب
+    شرب اشخاص: شرب روستایی
+    شرب روستا: شرب روستایی
+  use_overrides:              # استثناها (در اکسل، چاه شرب شهری نیشابور جزو شرب روستایی آمده)
+    - {county: نیشابور, from: شرب, to: شرب روستایی}
+  location_overrides: dashboard/tests/well_location_overrides.csv
+
+# -----------------------------------------------------------------------------
+# آمار سدهای داخل محدوده (هر سال آبی یک شیت)
+#   حجم در دسترس سد = حجم ابتدای سال آبی + ورودی
+#   county: شهرستان مصرف‌کننده برای ستون‌های شهرستانی (مثل اکسل همه «مشهد»)
+#   sub_basin: خالی/auto = از شیپ‌فایل نقاط سد
+# -----------------------------------------------------------------------------
+dams:
+  file: Amar_SAD.xlsx
+  use_map: {کشاورزی: کشاورزی, شرب: شرب, صنعت: صنعتی, سایر: خدمات}
+  points: {shapefile: shape/selected_dams.shp, name_field: Name}
+  list:
+    - {name: سد طرق, aliases: [طرق], county: مشهد}
+    - {name: سد کارده, aliases: [کارده], county: مشهد}
+    - {name: سد ارداک, aliases: [ارداک چناران, ارداک], county: مشهد}
+    - {name: سد چالی دره, aliases: [چالی دره, چالی دره طرقبه], county: مشهد}
+    - {name: سد دولت آباد, aliases: [دولت آباد], county: مشهد}
+
+# -----------------------------------------------------------------------------
+# آب انتقالی از بیرون محدوده (فقط مشهد: سد دوستی)
+#   حجم در دسترس = min(حجم ابتدای سال + ورودی ، cap)
+# -----------------------------------------------------------------------------
+transfers:
+  - name: سد دوستی
+    table: {file: water_acounting_1Sep25.xlsx, sheet: All_Dam_melted, filter: {Name of Dam: سد دوستی}}
+    columns: {year: Year, use: Type of Use, value: Value, begin_storage: حجم ابتدای سال آبی, inflow: ورودی}
+    cap: 180
+    county: مشهد
+    sub_basin: 3
+
+# -----------------------------------------------------------------------------
+# مصارف ویژه (فقط مشهد: فضای سبز با منابع سد، دوستی، چاه و تصفیه‌خانه)
+# -----------------------------------------------------------------------------
+special_withdrawals:
+  - use: فضای سبز مشهد
+    table: {file: water_acounting_1Sep25.xlsx, sheet: Urban_green_space}
+    year_column: Year
+    county: مشهد
+    sub_basin: 3
+    sources:
+      - {column: "خرید حجمی(سد دوستی و کارده)", factor: 0.5, source_group: dam, source_name: سد کارده}
+      - {column: "خرید حجمی(سد دوستی و کارده)", factor: 0.5, source_group: transfer, source_name: سد دوستی}
+      - {column: منابع آب زیر زمینی, factor: 1, source_group: gw}
+      - {column: مجموع تصفیه خانه ها, factor: 1, source_group: treatment}
+
+# -----------------------------------------------------------------------------
+# شاخص‌های سالانه از سیمای آب (پوشه Bilan): تجدیدپذیر سطحی/زیرزمینی و تغییر ذخیره آبخوان
+#   غیرتجدیدپذیر = −ΔS   ؛  آب زیرزمینی در دسترس = تجدیدپذیر زیرزمینی + غیرتجدیدپذیر
+#   (به نسبت مساحت بین زیرحوضه‌ها و شهرستان‌ها پخش می‌شود)
+# -----------------------------------------------------------------------------
+indicators:
+  renewable:
+    file: water_acounting_1Sep25.xlsx
+    sheet: renewable
+    columns: {year: Year, type: Type of Source, value: Value}
+    surface: سطحی
+    ground: زیرزمینی
+  storage_change:
+    file: water_acounting_1Sep25.xlsx
+    sheet: DeltaS
+    columns: {year: Year, value: Delta_S}

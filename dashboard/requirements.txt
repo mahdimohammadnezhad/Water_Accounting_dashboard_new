@@ -1,0 +1,12 @@
+pandas>=2.2
+openpyxl
+xlrd
+xlsxwriter
+pyarrow
+pyyaml
+geopandas>=1.0
+pyogrio
+shapely>=2.0
+pyproj
+streamlit>=1.50
+plotly>=6.0

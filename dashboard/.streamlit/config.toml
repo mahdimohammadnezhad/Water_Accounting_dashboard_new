@@ -1,0 +1,28 @@
+[server]
+enableStaticServing = true
+runOnSave = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "light"
+primaryColor = "#0e7490"
+backgroundColor = "#f5f8fc"
+secondaryBackgroundColor = "#e9f0f7"
+textColor = "#1e293b"
+borderColor = "#d6e0ea"
+font = "Vazirmatn, Tahoma, sans-serif"
+headingFont = "Vazirmatn, Tahoma, sans-serif"
+baseRadius = "0.6rem"
+showWidgetBorder = true
+
+[[theme.fontFaces]]
+family = "Vazirmatn"
+url = "app/static/fonts/Vazirmatn-Variable.woff2"
+weight = "100 900"
+style = "normal"
+
+[theme.sidebar]
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#eef3f9"
