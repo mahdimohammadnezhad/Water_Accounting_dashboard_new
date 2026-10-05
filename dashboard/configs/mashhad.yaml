@@ -8,6 +8,7 @@
 basin:
   key: mashhad
   name: محدوده مطالعاتی مشهد - چناران
+  name_en: Mashhad–Chenaran study area   # نام انگلیسی (اختیاری)
   base_dir: ../..            # پوشه داده‌ها نسبت به همین فایل (D:\Term2\WERI\Water_Accounting)
   crs: EPSG:32640            # سیستم مختصات کاری (UTM 40N)
 
@@ -136,7 +137,7 @@ dams:
 transfers:
   - name: سد دوستی
     source: simaye_ab
-    field: doosti_transfer
+    field: transfer_in
     use: شرب
     available: 180
     county: مشهد

@@ -1,66 +1,102 @@
-# داشبورد هوشمند منابع و مصارف آب
+# Water accounting dashboard
 
-جدول منابع و مصارف (به سبک شیت DYNMIC) را مستقیم از داده‌های خام می‌سازد و به هر تفکیکی
-(سال آبی، زیرحوضه، شهرستان، کاربری، نوع منبع) نمایش می‌دهد.
+Builds the sources-and-uses water balance of a study area (in the style of the `DYNMIC` sheet of the original
+Excel workbook) directly from raw files, and shows it for any combination of water year, sub-basin, county, use
+and source type. The interface is available in **Persian (default) and English**.
 
-## منابع داده (فقط همین‌ها)
-| داده | فایل | کجای کد خوانده می‌شود |
+## Inputs
+| Data | Typical file | Read by |
 |---|---|---|
-| برداشت چاه‌ها | `CHAH_MASHAHD.xls` | `wa/loaders.py` ← `load_wells` |
-| آمار سدها (حجم ابتدای سال، ورودی، مصارف، موقعیت) | `Amar_SAD.xlsx` (هر سال یک شیت) | `wa/loaders.py` ← `load_dams` و `_parse_dam_sheet` |
-| تجدیدپذیر سطحی/زیرزمینی، تغییر ذخیره آبخوان، آب انتقالی سد دوستی | PDFهای سیمای آب در پوشه `Bilan` | `wa/simaye_ab.py` ← `read_folder` / `parse_page` |
-| زیرحوضه‌ها، شهرستان‌ها، نقاط سد | `shape/final_boundary_fixed.shp`، `shape/shahrestan.shp`، `shape/selected_dams.shp` | `wa/spatial.py` |
+| Well withdrawals (year, county, UTM X/Y, use, volume) | `CHAH_MASHAHD.xls` | `wa/loaders.py` → `load_wells` |
+| Dam statistics (start-of-year storage, inflow, uses, location) — one sheet per water year | `Amar_SAD.xlsx` | `wa/loaders.py` → `load_dams` |
+| Renewable surface / groundwater, aquifer storage change, inter-basin transfer | *Simaye Ab* PDFs (`Bilan/`) | `wa/simaye_ab.py` |
+| Sub-basins, counties, dam points | shapefiles (`shape/`) | `wa/spatial.py` |
 
-مسیر و نام ستون‌ها همه در `configs/mashhad.yaml` است و کد هیچ نام فایلی را مستقیم ندارد.
-فایل اکسل نمونه (`water_acounting_1Sep25.xlsx`) در داشبورد استفاده نمی‌شود؛ فقط `validate_excel.py`
-برای مقایسه با آن را می‌خواند.
+All paths and column names live in one YAML file per basin (`configs/<basin>.yaml`); the code contains no file
+names. The sample Excel workbook is **not** used by the dashboard — only `validate_excel.py` reads it, to compare
+results.
 
-## اجرا
-روی `run_dashboard.bat` دوبار کلیک کنید. مرورگر روی `http://localhost:8501` باز می‌شود.
-بار اول (و هر بار که یکی از فایل‌های ورودی تغییر کند) داده‌ها حدود ۱۰ ثانیه دوباره ساخته می‌شوند.
+## Running
+Double-click `run_dashboard.bat` (or `..\.venv\Scripts\python.exe -m streamlit run app.py`), then open
+http://localhost:8501. The first run (and any run after an input file changes) rebuilds the processed data in
+about 10 seconds; after that every filter change takes under a second.
 
-## منطق محاسبه
-- **چاه‌ها**: «برداشت واقعی» ÷ ۱۰⁶. زیرحوضه و شهرستان مکانی از موقعیت چاه روی شیپ‌فایل‌ها (چاه تا ۵ کیلومتر بیرون
-  مرز → نزدیک‌ترین پلیگون؛ مختصات نامعتبر → زیرحوضه‌ای که بیشتر چاه‌های همان شهرستان در آن است).
-- **سدها**: حجم در دسترس = حجم ابتدای سال آبی + ورودی؛ برداشت هر کاربری از ستون‌های «مصارف»؛ شهرستان از ستون «موقعیت».
-- **سیمای آب**: از جدول اول هر PDF ستون «سال آبی» خوانده می‌شود (حتی در PDFهایی که فونت فارسی‌شان خراب استخراج
-  می‌شود). غیرتجدیدپذیر = −ΔS ؛ آب زیرزمینی در دسترس = تجدیدپذیر زیرزمینی + غیرتجدیدپذیر، به نسبت مساحت بین
-  زیرحوضه‌ها و شهرستان‌ها پخش می‌شود.
-- **آب انتقالی (سد دوستی)**: برداشت = «آب انتقالی جهت مصرف شرب از سد دوستی» در توضیحات جدول سیمای آب؛
-  حجم در دسترس = سهم ثابت ۱۸۰ میلیون مترمکعب (قابل تغییر در پیکربندی).
-- **آب برگشتی**: برگشت کل = ضریب × مجموع برداشت. سهم `river_fraction` به بازه رودخانه (برای شرب مشهد بازه ۴) و
-  باقی به آبخوان‌ها به نسبت برداشت زیرزمینی. نصف برگشت شرب مشهد خروجی تصفیه‌خانه گزارش می‌شود.
-- **مصارف (C)** = برداشت − برگشت ؛ **کنترل بیلان (B)** = حجم در دسترس سد، آب زیرزمینی و انتقالی − مصارف.
+## Dashboard pages
+| Tab | Content |
+|---|---|
+| Sources & uses table | Rows = sources (dams, river reaches, sub-basin aquifers, transfers, treatment plant); columns = use × breakdown × (withdrawal, return); available volume (G), check column, total / consumption / balance rows. Conditional formatting (colour by size, optional log scale). Excel export with the same colours. |
+| Charts | Sankey (source → use), withdrawal by use and source type, share of each use in consumption |
+| Annual trend | Withdrawal, resources, consumption and balance for every year with the same filters |
+| Sub-basin × county | Withdrawal and area of every county inside every sub-basin, plus a downloadable detail table |
+| Map | Sub-basins, county borders, wells and dams on OpenStreetMap, Esri satellite imagery or a plain (offline) background |
+| Data & quality control | Import warnings, the values read from each Simaye Ab PDF, dam statistics, downloads of all base data |
 
-## مقایسه با اکسل نمونه
-`..\.venv\Scripts\python.exe validate_excel.py`
-۱) با همان ورودی‌های اکسل (`tests/mashhad_excel_check.yaml`) موتور پایتون سلول به سلول با DYNMIC یکی است.
-۲) با منابع داده اصلی، اختلاف‌ها فقط از آب انتقالی دوستی (سیمای آب در برابر اکسل) و فضای سبز مشهد (که در این
-   منابع داده نیست) می‌آید.
+Column layouts: *Excel template* (drinking & industry by county, the rest by sub-basin, as in DYNMIC), all uses by
+county, all uses by sub-basin, or by use only. Return-flow coefficients can be edited in the sidebar.
 
-## افزودن حوضه، شهرستان یا زیرحوضه جدید
-۱. `configs/mashhad.yaml` را کپی کنید و `basin.key` و `basin.name` را عوض کنید.
-۲. مسیر شیپ‌فایل زیرحوضه‌ها (`id_field`) و شهرستان‌ها را بدهید.
-۳. در `wells.columns` نام ستون‌های فایل چاه‌ها و در `use_map` نگاشت کاربری‌ها را تنظیم کنید.
-۴. در `dams.list` سدهای داخل محدوده و نام‌هایشان در فایل آمار سد (`aliases`) را بنویسید.
-۵. پوشه PDFهای سیمای آب آن محدوده را در `simaye_ab.folder` بدهید.
-۶. اگر حوضه آب انتقالی ندارد بخش `transfers` را حذف کنید؛ اگر تصفیه‌خانه ندارد `treatment_fraction` را بردارید.
-۷. `county_outlet_reach` را مطابق بازه خروجی هر شهرستان تنظیم کنید.
-حوضه جدید خودکار در منوی «حوضه / محدوده مطالعاتی» ظاهر می‌شود.
+## Method
+- **Wells**: actual withdrawal (m³ → million m³). Sub-basin and county polygon from the well location; wells up to
+  5 km outside the boundary snap to the nearest polygon; wells with invalid coordinates go to the main sub-basin
+  of their county.
+- **Dams**: available volume = start-of-year storage + inflow; withdrawals per use from the *uses* columns;
+  county from the *location* column; sub-basin from the dam point shapefile.
+- **Simaye Ab**: the first table of each PDF is read from its value column, so it also works for PDFs whose
+  legacy Persian font cannot be extracted as text. Non-renewable = −ΔS; groundwater available = renewable
+  groundwater + non-renewable, split between sub-basins and counties by area.
+- **Transfer** (e.g. Doosti dam for Mashhad): withdrawal = the transfer volume quoted in the Simaye Ab table;
+  available volume = a fixed allocation in the config (180 MCM for Mashhad).
+- **Return flow**: return = coefficient × withdrawal of the group. The `river_fraction` share goes to a river
+  reach (for Mashhad urban drinking: reach 4), the rest to the aquifers in proportion to groundwater withdrawal.
+  Half of Mashhad's urban drinking return is reported as treatment-plant output.
+- **Consumption (C)** = withdrawal − return; **balance check (B)** = available volume of dams, groundwater and
+  transfers − consumption.
 
-## ساختار پوشه
+## Adding another basin
+The same code runs for any study area whose files are of the same kinds (they may use other file names, column
+names, sheet names, coordinate systems, numbers of sub-basins, etc.).
+
+1. Put the basin's files in one folder (sub-folders are fine): the well Excel, the dam Excel (one sheet per
+   water year, e.g. `94-95` or `1394-95`), the Simaye Ab PDFs, and the sub-basin and county shapefiles
+   (optionally a dam-point shapefile).
+2. In the sidebar open **Add a new basin**, enter the folder path and a name, and click *Scan folder & create
+   config* — or run `..\.venv\Scripts\python.exe new_basin.py "<folder>" --name "<name>"`.
+3. The files, fields and coordinate system are detected automatically and `configs/<key>.yaml` is written,
+   followed by a health check. The new basin appears in the basin selector.
+4. Review the generated config: return coefficients (`uses`), outlet reach of each county
+   (`county_outlet_reach`), dam names (`dams.list`) and transfers. `configs/mashhad.yaml` is a fully documented
+   example.
+
+Anything missing is tolerated: a basin without dams, transfers, a county shapefile or some Simaye Ab years still
+runs; the problems are listed in the *Data & quality control* tab.
+
+## Checks
+```
+..\.venv\Scripts\python.exe check_basin.py            # build every basin, compute every year/layout/county basis
+..\.venv\Scripts\python.exe tests\make_test_basin.py  # synthetic "other basin" → auto-detect → health check
+..\.venv\Scripts\python.exe validate_excel.py         # compare with the DYNMIC sheet of the sample Excel
+```
+`validate_excel.py` shows that, fed the same inputs as the Excel workbook (`tests/mashhad_excel_check.yaml`),
+the engine reproduces DYNMIC cell by cell (only the aquifer areas differ slightly: shapefile vs. the
+`boundary_area` sheet).
+
+## Folder structure
 ```
 dashboard/
-  app.py                 رابط کاربری (Streamlit)
-  configs/*.yaml         یک فایل پیکربندی برای هر حوضه
-  wa/simaye_ab.py        خواندن جدول بیلان PDFهای سیمای آب
-  wa/loaders.py          خواندن چاه‌ها، سدها، آب انتقالی
-  wa/spatial.py          زیرحوضه/شهرستان، تخصیص مکانی، مساحت‌ها
-  wa/engine.py           موتور بیلان و آب برگشتی
-  wa/table.py            جدول منابع و مصارف + قالب‌بندی شرطی + خروجی اکسل
-  wa/charts.py, wa/ui.py نمودارها، نقشه، ظاهر
-  static/fonts/          فونت Vazirmatn (محلی، بدون نیاز به اینترنت)
-  tests/                 پیکربندی مقایسه با اکسل نمونه
-  validate_excel.py      مقایسه با شیت DYNMIC
-  data/processed/        خروجی ساخته‌شده (خودکار؛ قابل حذف)
+  app.py                 Streamlit interface (Persian / English)
+  new_basin.py           create a basin config from a data folder
+  check_basin.py         health check of one or all basins
+  validate_excel.py      comparison with the sample Excel's DYNMIC sheet
+  configs/*.yaml         one config per basin
+  wa/config.py           config loading and defaults (column aliases, use mapping, return coefficients)
+  wa/detect.py           automatic detection of the input files
+  wa/loaders.py          wells, dams, transfers, indicators
+  wa/simaye_ab.py        Simaye Ab PDF reader
+  wa/spatial.py          sub-basins / counties, spatial assignment, areas
+  wa/engine.py           balance engine and return flows
+  wa/table.py            sources-and-uses table, conditional formatting, Excel export
+  wa/charts.py, wa/ui.py charts, map, layout
+  wa/i18n.py             Persian / English texts and vocabulary
+  static/fonts/          Vazirmatn font (served locally, no internet needed)
+  tests/                 Excel-comparison config and the synthetic-basin test
+  data/processed/        generated data (automatic; safe to delete)
 ```

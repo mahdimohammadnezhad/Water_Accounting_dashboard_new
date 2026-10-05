@@ -83,7 +83,7 @@ def parse_page(page):
             same = [(u, _number(u["text"])) for u in words
                     if abs(u["top"] - w["top"]) < 4 and u["x1"] <= w["x0"] + 1 and _number(u["text"]) is not None]
             if same:
-                out["doosti_transfer"] = max(same, key=lambda t: t[0]["x1"])[1]
+                out["transfer_in"] = max(same, key=lambda t: t[0]["x1"])[1]
                 break
     m = None
     for w in words:
@@ -119,19 +119,32 @@ def read_pdf(path):
 
 def read_folder(folder, pattern="*.pdf", assume_deficit=True):
     """All PDFs in a folder -> one row per water year. With assume_deficit, ΔS is always taken as a
-    storage loss (some PDFs print the deficit without a minus sign, e.g. 1398-99: 163.9)."""
+    storage loss (some PDFs print the deficit without a minus sign, e.g. 1398-99: 163.9).
+    Returns (rows, notes) where notes are {"fa": ..., "en": ...} messages."""
     rows, notes = [], []
     for p in sorted(Path(folder).glob(pattern)):
-        r = read_pdf(p)
+        try:
+            r = read_pdf(p)
+        except Exception as e:  # noqa: BLE001 - a damaged PDF must not stop the build
+            notes.append({"fa": f"{p.name} خوانده نشد ({e}).", "en": f"{p.name} could not be read ({e})."})
+            continue
         if not r:
-            notes.append(f"جدول بیلان در {p.name} پیدا نشد.")
+            notes.append({"fa": f"جدول بیلان در {p.name} پیدا نشد.", "en": f"No balance table found in {p.name}."})
+            continue
+        if not r.get("year"):
+            notes.append({"fa": f"سال آبی {p.name} معلوم نشد (نه در جدول، نه در نام فایل).",
+                          "en": f"Water year of {p.name} is unknown (neither in the table nor in the file name)."})
             continue
         if r.get("derived"):
-            notes.append(f"{p.name}: عدد سطحی در متن PDF نبود؛ {r['derived']} ({r['renew_surface']}).")
+            notes.append({"fa": f"{p.name}: عدد سطحی در متن PDF نبود؛ سطحی = تجدیدشونده − زیرزمینی ({r['renew_surface']}).",
+                          "en": f"{p.name}: surface value missing from the PDF text; surface = renewable − groundwater "
+                                f"({r['renew_surface']})."})
         ds = r.get("delta_s_reported")
         if ds is not None:
             if assume_deficit and ds > 0:
-                notes.append(f"{p.name}: تغییر ذخیره آبخوان بدون علامت منفی ({ds}) آمده و کسری در نظر گرفته شد.")
+                notes.append({"fa": f"{p.name}: تغییر ذخیره آبخوان بدون علامت منفی ({ds}) آمده و کسری در نظر گرفته شد.",
+                              "en": f"{p.name}: aquifer storage change printed without a minus sign ({ds}); "
+                                    f"treated as a deficit."})
             r["delta_s"] = -abs(ds) if assume_deficit else ds
         rows.append(r)
     return rows, notes

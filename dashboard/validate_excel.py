@@ -28,7 +28,7 @@ pd.set_option("display.width", 220)
 def compare(cfg, ws):
     year = norm(ws["BE2"].value)
     base = get_base(cfg, log=lambda *_: None)
-    uses = cfg["uses"]
+    uses = base["meta"]["uses"]
     W, RET, RES = compute(base, cfg, uses, "attribute")
     counties = sorted(set(W.county) | set(RES.county))
     t, totals = build_table(base, cfg, uses, W, RET, RES, year, base["meta"]["sub_basins"], counties,

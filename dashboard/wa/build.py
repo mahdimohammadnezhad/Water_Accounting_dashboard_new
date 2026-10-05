@@ -1,70 +1,98 @@
-"""Build step: raw files -> tidy parquet tables in dashboard/data/processed/<basin>/ (cached by signature)."""
+"""Build step: raw files -> tidy parquet tables in dashboard/data/processed/<basin>/ (cached by signature).
+
+Only the sub-basin shapefile is mandatory. Each other source (wells, dams, Simaye Ab PDFs, transfers,
+special uses) is optional; if one fails to load, the build continues and the error is reported in the
+dashboard's data-quality tab.
+"""
 import json
 import time
+import traceback
 
 import pandas as pd
 from pyproj import Transformer
 
 from . import loaders, spatial
-from .config import clear_excel_cache, processed_dir, signature, to_json
+from .config import clear_excel_cache, processed_dir, resolve_uses, signature, to_json
 from .text import natural_key
 
 TABLES = ["W", "RES", "indicators", "cells", "wells", "dams", "dam_stats", "simaye"]
+WELL_COLS = ["year", "x", "y", "use", "county_attr", "county_geo", "sub_basin", "sb_method", "value"]
+DAM_META_COLS = ["dam", "sub_basin", "location_county", "county", "x", "y"]
+
+
+def _step(report, name_fa, name_en, fn, fallback):
+    try:
+        return fn()
+    except Exception as e:  # noqa: BLE001 - keep building with what is available
+        loaders.warn(report, f"خطا در خواندن {name_fa}: {e}", f"Error while reading {name_en}: {e}")
+        report.setdefault("errors", []).append(traceback.format_exc())
+        return fallback()
 
 
 def build(cfg, log=print):
     t0 = time.time()
     report = {"warnings": [], "info": {}}
     clear_excel_cache()
-    log("خواندن شیپ‌فایل‌ها ...")
-    sb = spatial.load_sub_basins(cfg)
-    ct = spatial.load_counties(cfg)
+    log("shapefiles ...")
+    sb = spatial.load_sub_basins(cfg)  # required
+    ct = _step(report, "شیپ‌فایل شهرستان‌ها", "county shapefile", lambda: spatial.load_counties(cfg, sb), lambda: None)
     cells = spatial.cell_areas(sb, ct)
+    report["info"]["crs"] = cfg["basin"]["crs"]
+    report["info"]["sub-basin id field"] = cfg["spatial"]["sub_basins"].get("_id_field_used")
 
-    log("خواندن جدول بیلان سیمای آب (PDF) ...")
-    simaye = loaders.load_simaye(cfg, report)
+    log("simaye ab pdf ...")
+    simaye = _step(report, "PDFهای سیمای آب", "Simaye Ab PDFs", lambda: loaders.load_simaye(cfg, report),
+                   pd.DataFrame)
 
-    log("خواندن آمار سدها ...")
-    if "dams" in cfg:
-        dam_W, dam_RES, dams, dam_stats = loaders.load_dams(cfg, sb, ct, report)
-    else:
-        dam_W = pd.DataFrame(columns=loaders.W_COLS)
-        dam_RES = pd.DataFrame(columns=loaders.RES_COLS)
-        dams = pd.DataFrame(columns=["dam", "sub_basin", "location_county", "county", "x", "y"])
-        dam_stats = pd.DataFrame()
+    log("dams ...")
+    empty_dams = lambda: (pd.DataFrame(columns=loaders.W_COLS), pd.DataFrame(columns=loaders.RES_COLS),  # noqa: E731
+                          pd.DataFrame(columns=DAM_META_COLS), pd.DataFrame())
+    dam_W, dam_RES, dams, dam_stats = _step(report, "آمار سدها", "dam statistics",
+                                            lambda: loaders.load_dams(cfg, sb, ct, report), empty_dams) \
+        if cfg.get("dams") else empty_dams()
 
-    log("خواندن آمار چاه‌ها (ممکن است چند ثانیه طول بکشد) ...")
-    wells = loaders.load_wells(cfg, sb, ct, report) if "wells" in cfg else pd.DataFrame(
-        columns=["year", "x", "y", "use", "county_attr", "county_geo", "sub_basin", "sb_method", "value"])
+    log("wells ...")
+    wells = _step(report, "آمار چاه‌ها", "well statistics", lambda: loaders.load_wells(cfg, sb, ct, report),
+                  lambda: pd.DataFrame(columns=WELL_COLS)) if cfg.get("wells") else pd.DataFrame(columns=WELL_COLS)
     gw_W = wells.groupby(["year", "use", "county_attr", "county_geo", "sub_basin"], as_index=False).value.sum()
     gw_W.insert(1, "source_group", "gw")
     gw_W.insert(2, "source_name", gw_W.sub_basin.map(lambda s: cfg["spatial"]["aquifer_label"].format(id=s)))
+    W_main = pd.concat([dam_W, gw_W[loaders.W_COLS]], ignore_index=True)
 
-    log("آب انتقالی، مصارف ویژه و شاخص‌ها ...")
-    tr_W, tr_RES = loaders.load_transfers(cfg, report, simaye)
-    sp_W = loaders.load_special(cfg, dams, report)
-    indicators = loaders.load_indicators(cfg, report, simaye)
+    log("transfers, special uses, indicators ...")
+    empty_pair = lambda: (pd.DataFrame(columns=loaders.W_COLS), pd.DataFrame(columns=loaders.RES_COLS))  # noqa: E731
+    tr_W, tr_RES = _step(report, "آب انتقالی", "transfers", lambda: loaders.load_transfers(cfg, report, simaye, W_main),
+                         empty_pair)
+    sp_W = _step(report, "مصارف ویژه", "special uses", lambda: loaders.load_special(cfg, dams, report),
+                 lambda: pd.DataFrame(columns=loaders.W_COLS))
+    indicators = _step(report, "شاخص‌های سیمای آب", "Simaye Ab indicators",
+                       lambda: loaders.load_indicators(cfg, report, simaye),
+                       lambda: pd.DataFrame(columns=loaders.IND_COLS))
     gw_RES = loaders.gw_resources(cfg, indicators, cells)
 
-    W = pd.concat([dam_W, gw_W[loaders.W_COLS], tr_W, sp_W], ignore_index=True)
-    W["value"] = W.value.astype(float)
+    W = pd.concat([W_main, tr_W, sp_W], ignore_index=True)
+    W["value"] = pd.to_numeric(W.value, errors="coerce").fillna(0.0)
     W = W[W.year.notna()]
     RES = pd.concat([dam_RES, gw_RES, tr_RES], ignore_index=True)
-    RES["value"] = RES.value.astype(float)
+    RES["value"] = pd.to_numeric(RES.value, errors="coerce").fillna(0.0)
+    if W.empty:
+        loaders.warn(report, "هیچ برداشتی خوانده نشد؛ مسیر فایل‌های چاه و سد را در پیکربندی بررسی کنید.",
+                     "No withdrawals were read; check the well and dam file paths in the config.")
 
     # geographic coordinates for the web map
     to_ll = Transformer.from_crs(cfg["basin"]["crs"], "EPSG:4326", always_xy=True)
     for df in (wells, dams):
-        ok = df.x.notna() & df.y.notna() & (pd.to_numeric(df.x, errors="coerce") > 0)
-        lon, lat = to_ll.transform(df.loc[ok, "x"].astype(float).values, df.loc[ok, "y"].astype(float).values)
-        df["lon"], df["lat"] = None, None
-        df.loc[ok, "lon"], df.loc[ok, "lat"] = lon, lat
-        df["lon"] = df.lon.astype(float)
-        df["lat"] = df.lat.astype(float)
+        x, y = pd.to_numeric(df.x, errors="coerce"), pd.to_numeric(df.y, errors="coerce")
+        ok = x.notna() & y.notna() & (x != 0)
+        df["lon"], df["lat"] = float("nan"), float("nan")
+        if ok.any():
+            lon, lat = to_ll.transform(x[ok].values, y[ok].values)
+            df.loc[ok, "lon"], df.loc[ok, "lat"] = lon, lat
 
     for df in (W, RES, cells, wells, dams):
         for c in df.columns:
-            if c in ("sub_basin", "county_geo", "county_attr", "county", "location_county", "year"):
+            if c in ("sub_basin", "county_geo", "county_attr", "county", "location_county", "year", "use",
+                     "source_name", "source_group", "dam"):
                 df[c] = df[c].astype(object).where(df[c].notna(), None).astype("string")
 
     out = processed_dir(cfg)
@@ -72,18 +100,29 @@ def build(cfg, log=print):
     tables = {"W": W, "RES": RES, "indicators": indicators, "cells": cells, "wells": wells, "dams": dams,
               "dam_stats": dam_stats, "simaye": simaye}
     for k, df in tables.items():
-        df.to_parquet(out / f"{k}.parquet", index=False)
+        df.reset_index(drop=True).to_parquet(out / f"{k}.parquet", index=False)
     shapes = {"sub_basins": spatial.to_plot_shapes(sb.to_crs(4326), "sub_basin", tolerance=0.0015),
               "counties": spatial.to_plot_shapes(ct.to_crs(4326), "county", tolerance=0.0015) if ct is not None else []}
     (out / "shapes.json").write_text(json.dumps(shapes, ensure_ascii=False), encoding="utf-8")
     # water years shown = years with well statistics or a Simaye Ab table (dam-only years are incomplete)
+    no_simaye = sorted(set(wells.year.dropna()) - set(indicators.year.dropna()))
+    if cfg.get("indicators") and no_simaye:
+        loaders.warn(report, f"برای این سال‌ها جدول سیمای آب نیست؛ آب زیرزمینی در دسترس (G) و کنترل بیلان آنها ناقص است: "
+                             f"{no_simaye}",
+                     f"No Simaye Ab table for these years; their groundwater availability (G) and balance check are "
+                     f"incomplete: {no_simaye}")
     main_years = set(wells.year.dropna()) | set(indicators.year.dropna())
     years = sorted(main_years or set(W.year.dropna()))
+    use_totals = W.groupby("use").value.sum().sort_values(ascending=False)
     meta = {"signature": signature(cfg), "built_at": time.strftime("%Y-%m-%d %H:%M"),
             "seconds": round(time.time() - t0, 1), "years": years,
-            "sub_basins": sorted(sb.sub_basin, key=natural_key), "report": report}
+            "sub_basins": sorted(sb.sub_basin, key=natural_key),
+            "uses": resolve_uses(cfg, list(use_totals.index)),
+            "has_county_attr": bool(len(wells)) and bool((wells.county_attr != spatial.UNKNOWN).any()),
+            "has_county_geo": ct is not None and not ct.empty,
+            "report": report}
     (out / "meta.json").write_text(to_json(meta), encoding="utf-8")
-    log(f"ساخت داده‌ها در {meta['seconds']} ثانیه تمام شد.")
+    log(f"done in {meta['seconds']} s")
     return load_processed(cfg)
 
 
@@ -106,7 +145,7 @@ def is_fresh(cfg):
         return False
     try:
         return json.loads(m.read_text(encoding="utf-8")).get("signature") == signature(cfg)
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
 
 

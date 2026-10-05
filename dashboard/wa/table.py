@@ -6,6 +6,7 @@ import pandas as pd
 
 from .config import GROUP_LABELS
 from .engine import restrict_members, row_catalog
+from .i18n import num, t, term
 from .text import natural_key
 
 KW, KR = "برداشت", "برگشت"
@@ -150,23 +151,36 @@ def build_table(base, cfg, uses, W, RET, RES, year, sbs, counties, uses_sel, lay
 
 
 # ----------------------------------------------------------------------------- rendering
-FA = str.maketrans("0123456789.,", "۰۱۲۳۴۵۶۷۸۹٫٬")
 USE_HEAD = ["#1d4ed8", "#0f766e", "#b45309", "#7c3aed", "#be185d", "#0369a1", "#4d7c0f", "#475569"]
 GROUP_TINT = {"سد": "#dbeafe", "بازه رودخانه": "#cffafe", "آب زیرزمینی": "#fef3c7", "انتقالی": "#d1fae5",
               "تصفیه خانه": "#e5e7eb", SUMMARY: "#e2e8f0"}
 RGB_W, RGB_R, RGB_POS, RGB_NEG = "37,99,235", "13,148,136", "5,150,105", "220,38,38"
-COLOR_LEGEND = [("برداشت (پررنگ‌تر = بیشتر)", f"linear-gradient(to left, rgba({RGB_W},.9), rgba({RGB_W},.1))"),
-                ("برگشت", f"linear-gradient(to left, rgba({RGB_R},.9), rgba({RGB_R},.1))"),
-                ("حجم در دسترس (نوار)", "linear-gradient(to left, rgba(245,158,11,.55) 60%, #fff 60%)"),
-                ("کنترل منفی (کسری)", f"rgba({RGB_NEG},.6)"), ("کنترل مثبت", f"rgba({RGB_POS},.55)")]
 
 
-def _fmt(v):
+def color_legend(lang):
+    d = "left" if lang == "fa" else "right"
+    return [(t("lg_w", lang), f"linear-gradient(to {d}, rgba({RGB_W},.9), rgba({RGB_W},.1))"),
+            (t("lg_r", lang), f"linear-gradient(to {d}, rgba({RGB_R},.9), rgba({RGB_R},.1))"),
+            (t("lg_g", lang), f"linear-gradient(to {d}, rgba(245,158,11,.55) 60%, #fff 60%)"),
+            (t("lg_neg", lang), f"rgba({RGB_NEG},.6)"), (t("lg_pos", lang), f"rgba({RGB_POS},.55)")]
+
+
+def _fmt(v, lang="fa"):
     if v is None or (isinstance(v, float) and np.isnan(v)):
         return ""
     if abs(v) < 5e-5:
         return "·"
-    return f"{v:,.2f}".translate(FA)
+    return num(v, lang, "{:,.2f}")
+
+
+def translate_labels(df, lang):
+    """Same table with translated row/column labels (for display/export only)."""
+    if lang != "en":
+        return df
+    out = df.rename(index=lambda v: term(v, lang), columns=lambda v: term(v, lang))
+    out.index.names = [term(n, lang) for n in df.index.names]
+    out.columns.names = [term(n, lang) if n else n for n in df.columns.names]
+    return out
 
 
 def _shade(v, vmax, rgb, log=True):
@@ -182,12 +196,18 @@ def _tint(hex_color, a):
     return f"rgba({int(h[0:2], 16)},{int(h[2:4], 16)},{int(h[4:6], 16)},{a})"
 
 
-def to_html(t, conditional=True, log_scale=True):
+def to_html(t, conditional=True, log_scale=True, lang="fa"):
+    t = t.copy()
+    t.index.names = [term(n, lang) for n in t.index.names]
+    t.columns.names = [term(n, lang) if n else n for n in t.columns.names]
     cols = list(t.columns)
     wcols = [c for c in cols if c[2] == KW]
     rcols = [c for c in cols if c[2] == KR]
     body = [i for i in t.index if i[0] != SUMMARY]
-    sty = t.style.format(_fmt)
+    bar_dir = "left" if lang == "fa" else "right"
+    sty = t.style.format(lambda v: _fmt(v, lang))
+    if lang == "en":
+        sty = sty.format_index(lambda v: term(v, lang), axis=0).format_index(lambda v: term(v, lang), axis=1)
 
     def row_style(r):
         if r.name[0] != SUMMARY:
@@ -211,7 +231,8 @@ def to_html(t, conditional=True, log_scale=True):
             if not isinstance(v, (int, float)) or np.isnan(v) or v <= 0 or gmax <= 0:
                 return ""
             p = 100 * v / gmax
-            return f"background: linear-gradient(to left, rgba(245,158,11,.5) {p:.0f}%, #fff {p:.0f}%); font-weight:700"
+            return (f"background: linear-gradient(to {bar_dir}, rgba(245,158,11,.5) {p:.0f}%, #fff {p:.0f}%); "
+                    "font-weight:700")
 
         def ctrl(v):
             if not isinstance(v, (int, float)) or np.isnan(v) or abs(v) < 5e-5 or cmax <= 0:
@@ -249,16 +270,18 @@ def to_html(t, conditional=True, log_scale=True):
     return sty.set_table_attributes('class="wa-table"').to_html()
 
 
-def to_excel_bytes(sheets, title=""):
+def to_excel_bytes(sheets, title="", lang="fa"):
     """sheets: {name: DataFrame}. Writes formatted workbook (merged multi-level headers)."""
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="xlsxwriter") as xw:
         for name, df in sheets.items():
             start = 2 if title else 0
-            df.to_excel(xw, sheet_name=name[:31], startrow=start)
-            ws = xw.sheets[name[:31]]
+            name = str(term(name, lang))[:31]
+            translate_labels(df, lang).to_excel(xw, sheet_name=name, startrow=start)
+            ws = xw.sheets[name]
             wb = xw.book
-            ws.right_to_left()
+            if lang == "fa":
+                ws.right_to_left()
             if title:
                 ws.write(0, 0, title, wb.add_format({"bold": True, "font_size": 13}))
             num = wb.add_format({"num_format": "#,##0.00"})
