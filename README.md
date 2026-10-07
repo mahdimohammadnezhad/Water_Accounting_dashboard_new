@@ -21,6 +21,8 @@ Bilan/*.pdf                    Simaye Ab reports (water-balance table)
 shape/final_boundary_fixed.*   sub-basins
 shape/shahrestan.*             counties
 shape/selected_dams.*          dam locations
+shape/Basins/Mahdoude.*        all study areas of Iran (map context, configs/_regional.yaml)
+shape/shahrestan/shrestan.*    all counties of Iran (map context, configs/_regional.yaml)
 water_acounting_1Sep25.xlsx    (optional) sample Excel, only used by validate_excel.py
 ```
 

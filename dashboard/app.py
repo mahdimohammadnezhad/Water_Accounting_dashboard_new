@@ -229,12 +229,13 @@ st.markdown(f"<div class='wa-sec-title'>{T('sec_uses')}</div>" + ui.cards([
      "note": T("note_balance"), "tone": "neg" if neg else "pos"},
 ], lang, unit), unsafe_allow_html=True)
 
-tabs = st.tabs([T("tab_table"), T("tab_charts"), T("tab_trend"), T("tab_matrix"), T("tab_map"), T("tab_qc")])
+tab_map, tab_table, tab_charts, tab_trend, tab_matrix, tab_qc = st.tabs(
+    [T("tab_map"), T("tab_table"), T("tab_charts"), T("tab_trend"), T("tab_matrix"), T("tab_qc")])
 Wsel = restrict_members(filt(W, year, sbs, counties, uses_sel), uses_cfg, restrict)
 Wsel = Wsel[Wsel.source_group.isin(groups)]
 
 # ----------------------------------------------------------------------------- tab: table
-with tabs[0]:
+with tab_table:
     if cf:
         st.markdown(ui.legend(color_legend(lang)), unsafe_allow_html=True)
     st.markdown(f"<div class='wa-wrap'>{to_html(tbl, cf, log_scale, lang)}</div>", unsafe_allow_html=True)
@@ -254,7 +255,7 @@ with tabs[0]:
                        file_name=f"withdrawals_{cfg['basin']['key']}_{year}.csv", width="stretch")
 
 # ----------------------------------------------------------------------------- tab: charts
-with tabs[1]:
+with tab_charts:
     if Wsel.empty:
         st.info(T("no_data"))
     else:
@@ -270,7 +271,7 @@ with tabs[1]:
             c2.plotly_chart(fig, width="stretch")
 
 # ----------------------------------------------------------------------------- tab: trends
-with tabs[2]:
+with tab_trend:
     yt = yearly_totals(cfg_path, sig, mode, uses_json, tuple(years), tuple(sbs), tuple(counties), tuple(uses_sel),
                        layout, tuple(groups), restrict)
     Wall = restrict_members(filt(W, None, sbs, counties, uses_sel), uses_cfg, restrict)
@@ -288,7 +289,7 @@ with tabs[2]:
     st.dataframe(shade(show.style.format("{:,.2f}"), T("balance"), None, diverging=True), width="stretch")
 
 # ----------------------------------------------------------------------------- tab: sub-basin x county
-with tabs[3]:
+with tab_matrix:
     st.markdown(f"<div class='wa-note'>{T('matrix_note')}</div>", unsafe_allow_html=True)
     lab = Wsel.sub_basin.map(lambda s: sb_label.format(id=s))
     m = Wsel.assign(sb=lab).pivot_table(index="sb", columns="county", values="value", aggfunc="sum").fillna(0)
@@ -317,27 +318,47 @@ with tabs[3]:
                            file_name=f"subbasin_county_{cfg['basin']['key']}_{year}.xlsx")
 
 # ----------------------------------------------------------------------------- tab: map
-with tabs[4]:
-    c1, c2 = st.columns([2, 3])
-    basemap = c1.radio(T("basemap"), charts.BASEMAPS, format_func=lambda b: T(f"bm_{b}"), horizontal=True)
+with tab_map:
+    # three-way review mode: switches the related layers on and the others off (layers stay individually toggleable)
+    LAYER_KEYS = ["sb", "ct", "ctx_sa", "ctx_ct", "wells", "dams"]
+    ss = st.session_state
+    if not ss.get("map_mode"):
+        ss["map_mode"] = ss.get("_map_mode_last", "combined")
+    for k, v in charts.MODE_LAYERS[ss["map_mode"]].items():
+        ss.setdefault(f"lyr_{k}", v)
+
+    def _apply_mode():
+        m = ss.get("map_mode")
+        if m:
+            ss["_map_mode_last"] = m
+            for k, v in charts.MODE_LAYERS[m].items():
+                ss[f"lyr_{k}"] = v
+
+    c1, c2 = st.columns([3, 2])
+    with c1:
+        st.segmented_control(T("map_mode"), charts.MAP_MODES, format_func=lambda m: T(f"mode_{m}"), key="map_mode",
+                             on_change=_apply_mode, width="stretch")
     with c2:
-        k1, k2, k3, k4 = st.columns(4)
-        show_sb = k1.checkbox(T("lyr_sb"), True)
-        show_ct = k2.checkbox(T("lyr_ct"), True)
-        show_w = k3.checkbox(T("lyr_wells"), True)
-        show_d = k4.checkbox(T("lyr_dams"), True)
+        basemap = st.radio(T("basemap"), charts.BASEMAPS, format_func=lambda b: T(f"bm_{b}"), horizontal=True)
+    map_mode = ss.get("map_mode") or ss.get("_map_mode_last", "combined")
+    shapes = base["shapes"]
+    available = {"ctx_sa": bool(shapes.get("context_study_areas")), "ctx_ct": bool(shapes.get("context_counties")),
+                 "ct": bool(shapes.get("counties"))}
+    lc = st.columns(len(LAYER_KEYS))
+    layers = {k: lc[i].checkbox(T(f"lyr_{k}"), key=f"lyr_{k}", disabled=not available.get(k, True))
+              for i, k in enumerate(LAYER_KEYS)}
     wells = base["wells"].assign(county=base["wells"][ccol])
     wy = wells[(wells.year == year) & wells.sub_basin.isin(sbs) & wells.county.isin(counties) &
                wells.use.isin(uses_sel)]
     if "gw" not in groups:
         wy = wy.iloc[0:0]
-    st.plotly_chart(charts.basin_map(base["shapes"], sbs, wy, base["dams"], uses_all, sb_label, basemap, lang,
-                                     show_sb, show_ct, show_w, show_d),
+    st.plotly_chart(charts.basin_map(shapes, sbs, counties, wy, base["dams"], uses_all, sb_label, basemap, lang,
+                                     map_mode, layers),
                     width="stretch", config={"scrollZoom": True})
     st.markdown(f"<div class='wa-note'>{T('map_note')}</div>", unsafe_allow_html=True)
 
 # ----------------------------------------------------------------------------- tab: QC
-with tabs[5]:
+with tab_qc:
     rep = meta["report"]
     for w in rep["warnings"]:
         st.warning(msg(w, lang))

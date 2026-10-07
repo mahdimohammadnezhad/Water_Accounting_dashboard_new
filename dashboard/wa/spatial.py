@@ -153,6 +153,103 @@ def cell_areas(sub_basins, counties):
     return cells.reset_index(drop=True)
 
 
+# ----------------------------------------------------------------------------- country-wide layers
+STUDY_AREA_NAME_HINTS = ["mah_name", "mahdoude", "name", "nam"]
+STUDY_AREA_CODE_HINTS = ["mah_code", "code", "id"]
+
+
+def read_regional(spec, around=None):
+    """Country-wide layers in their own CRS: {'study_areas': [name, code, province, geometry],
+    'counties': [county, geometry]} (keys only for layers that exist).
+    `around` (a GeoSeries) limits reading to features near the basin, which is much faster."""
+    out = {}
+    if not spec:
+        return out
+    kw = {"bbox": around} if around is not None else {}
+    if "study_areas" in spec:
+        s = spec["study_areas"]
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            g = gpd.read_file(s["shapefile"], **kw)
+        if g.crs is None:
+            g = g.set_crs(4326)
+        nf = s.get("name_field") if s.get("name_field") in g else pick_field(g, STUDY_AREA_NAME_HINTS, False, True)
+        cf = s.get("code_field") if s.get("code_field") in g else pick_field(g, STUDY_AREA_CODE_HINTS)
+        pf = s.get("province_field") if s.get("province_field") in g else None
+        enc = s.get("fix_encoding", "auto")
+        g["name"] = [norm(v) for v in auto_fix_names(list(g[nf].astype(str)), enc)]
+        g["code"] = g[cf].map(norm) if cf else g.index.astype(str)
+        g["province"] = [norm(v) for v in auto_fix_names(list(g[pf].astype(str)), enc)] if pf else None
+        g["geometry"] = g.geometry.make_valid()
+        out["study_areas"] = g[["name", "code", "province", "geometry"]]
+    if "counties" in spec:
+        s = spec["counties"]
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            g = gpd.read_file(s["shapefile"], **kw)
+        if g.crs is None:
+            g = g.set_crs(4326)
+        nf = s.get("name_field") if s.get("name_field") in g else pick_field(g, COUNTY_NAME_HINTS, False, True)
+        g["county"] = [norm(v) for v in auto_fix_names(list(g[nf].astype(str)), s.get("fix_encoding", "auto"))]
+        g["geometry"] = g.geometry.make_valid()
+        out["counties"] = g.dissolve("county", as_index=False)[["county", "geometry"]]
+    return out
+
+
+def find_study_area(study_areas, key=None, sub_basins=None):
+    """The basin's own study area: by code or name (`key`), else the one overlapping the sub-basins most."""
+    if study_areas is None or study_areas.empty:
+        return None
+    if key:
+        k = norm(key)
+        hit = study_areas[(study_areas.code == k) | (study_areas.name == k)]
+        if hit.empty:  # partial name, e.g. 'مشهد - چناران' -> 'مشهد'
+            hit = study_areas[study_areas.name.map(lambda n: bool(n) and (n in k or k in n))]
+        if len(hit) > 1 and sub_basins is not None:
+            ov = hit.to_crs(sub_basins.crs).intersection(sub_basins.union_all()).area
+            hit = hit.loc[[ov.idxmax()]]
+        return hit.iloc[[0]] if len(hit) else None
+    if sub_basins is not None:
+        sa = study_areas.to_crs(sub_basins.crs)
+        ov = sa.intersection(sub_basins.union_all()).area
+        return study_areas.loc[[ov.idxmax()]] if ov.max() > 0 else None
+    return None
+
+
+def sub_basins_from_study_area(cfg, sa_row):
+    """A basin without a sub-basin shapefile: the study area itself is the single sub-basin."""
+    g = sa_row[["name", "geometry"]].rename(columns={"name": "sub_basin"}).reset_index(drop=True)
+    cfg["basin"]["crs"] = basin_crs(cfg, g)
+    return _prepare(cfg, g)[["sub_basin", "geometry"]]
+
+
+def counties_from_regional(regional_counties, sub_basins):
+    g = regional_counties.to_crs(sub_basins.crs)
+    g = g[g.geometry.intersection(sub_basins.union_all()).area > 5e5]
+    return g.reset_index(drop=True)
+
+
+def context_layers(regional, sub_basins, own_sa, basin_counties, buffer_km):
+    """Neighbouring study areas / counties (lon-lat plot shapes) within buffer_km of the basin."""
+    out = {"study_area": [], "context_study_areas": [], "context_counties": []}
+    area = sub_basins.union_all().buffer(buffer_km * 1000)
+    if own_sa is not None:
+        out["study_area"] = to_plot_shapes(own_sa.to_crs(4326), "name", tolerance=0.0015)
+    if "study_areas" in regional:
+        sa = regional["study_areas"]
+        sa = sa[sa.to_crs(sub_basins.crs).intersects(area)]
+        if own_sa is not None:
+            sa = sa[sa.code != own_sa.code.iloc[0]]
+        out["context_study_areas"] = to_plot_shapes(sa.to_crs(4326), "name", tolerance=0.004)
+    if "counties" in regional:
+        ct = regional["counties"]
+        ct = ct[ct.to_crs(sub_basins.crs).intersects(area)]
+        if basin_counties is not None:
+            ct = ct[~ct.county.isin(set(basin_counties.county))]
+        out["context_counties"] = to_plot_shapes(ct.to_crs(4326), "county", tolerance=0.004)
+    return out
+
+
 def to_plot_shapes(gdf, key, tolerance=150):
     """Simplified outline coordinates for plotting."""
     shapes = []
@@ -166,5 +263,8 @@ def to_plot_shapes(gdf, key, tolerance=150):
             rings.append([list(map(float, c[:2])) for c in p.exterior.coords])
         lp = r.geometry.representative_point()
         if not math.isnan(lp.x):
-            shapes.append({"id": str(r[key]), "rings": rings, "label_xy": [lp.x, lp.y]})
+            shp = {"id": str(r[key]), "rings": rings, "label_xy": [lp.x, lp.y]}
+            if "province" in r and isinstance(r["province"], str):
+                shp["province"] = r["province"]
+            shapes.append(shp)
     return shapes

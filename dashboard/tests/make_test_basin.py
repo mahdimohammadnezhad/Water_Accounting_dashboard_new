@@ -62,11 +62,25 @@ pd.DataFrame({"a": [1, 2], "b": [3, 4]}).to_excel(OUT / "stats" / "notes.xlsx", 
 for f in ["simabm_mashhad_99_00.pdf", "simabm_mashhad_00_01.pdf", "BILAN402-03.pdf"]:
     shutil.copy(SRC / "Bilan" / f, OUT / "simaye ab" / f)
 print("synthetic basin written to", OUT)
+for f in (DASH / "configs").glob("test_basin*.yaml"):  # leftovers of a previous --keep run
+    f.unlink()
 
 code = subprocess.call([sys.executable, str(DASH / "new_basin.py"), str(OUT), "--name", "حوضه آزمایشی",
                         "--key", "test_basin"])
+
+# scenario B: no shapefiles at all (only the Excel files and PDFs) -> the study area is found from the well
+# locations in the country-wide layer (configs/_regional.yaml) and counties come from that layer too
+OUT_B = OUT.with_name(OUT.name + "_noshape")
+if OUT_B.exists():
+    shutil.rmtree(OUT_B)
+shutil.copytree(OUT / "stats", OUT_B / "stats")
+shutil.copytree(OUT / "simaye ab", OUT_B / "simaye ab")
+code_b = subprocess.call([sys.executable, str(DASH / "new_basin.py"), str(OUT_B), "--name", "حوضه بدون شیپ‌فایل",
+                          "--key", "test_basin_noshape"])
 if "--keep" not in sys.argv:
-    (DASH / "configs" / "test_basin.yaml").unlink(missing_ok=True)
-    shutil.rmtree(DASH / "data" / "processed" / "test_basin", ignore_errors=True)
-print("\nRESULT:", "OK" if code == 0 else "FAILED")
-sys.exit(code)
+    for f in (DASH / "configs").glob("test_basin*.yaml"):
+        f.unlink()
+    for d in (DASH / "data" / "processed").glob("test_basin*"):
+        shutil.rmtree(d, ignore_errors=True)
+print("\nRESULT:", "OK" if code == 0 and code_b == 0 else "FAILED", f"(with shapefiles: {code}, without: {code_b})")
+sys.exit(code or code_b)

@@ -12,8 +12,8 @@ import pandas as pd
 import pyogrio
 import yaml
 
-from .config import CONFIG_DIR, DEFAULT_USE_MAP, WELL_COLUMN_ALIASES, default_use
-from .spatial import COUNTY_NAME_HINTS, SUB_BASIN_ID_HINTS, basin_crs, pick_field
+from .config import CONFIG_DIR, DEFAULT_USE_MAP, WELL_COLUMN_ALIASES, default_use, regional_spec
+from .spatial import COUNTY_NAME_HINTS, SUB_BASIN_ID_HINTS, basin_crs, find_study_area, pick_field, read_regional
 from .text import match_column, norm, sheet_year
 
 SKIP_DIRS = {".venv", "venv", "dashboard", ".git", "__pycache__", "data"}
@@ -65,49 +65,127 @@ def _hint(path, hints):
     return sum(1 for i, h in enumerate(hints) if h in s)
 
 
+def _excel_roles(folder):
+    xls = _files(folder, {".xls", ".xlsx", ".xlsm"})
+    wells, dams = None, None
+    for p in xls:
+        n = _is_dam_file(p)
+        if n and (dams is None or n > dams[1]):
+            dams = (p, n)
+    for p in xls:
+        if dams and p == dams[0]:
+            continue
+        s, cols = _well_score(p)
+        if s >= 50 and (wells is None or s > wells[1]):
+            wells = (p, s, cols)
+    return wells, dams
+
+
+def _study_area_from_wells(sa_all, ct_all, wells):
+    """Study area holding most wells. UTM coordinates fall inside Iran in every zone that covers it (38-41),
+    so the zone is chosen by name agreement: the county (or study-area) written in the well statistics must
+    match the polygon the well falls in. Returns (study-area rows, zone)."""
+    cols = wells[2]
+    head = pd.read_excel(wells[0], nrows=2)
+    sa_col = match_column(head.columns, ["محدوده مطالعاتی", "محدوده", "study area", "mahdoude"])
+    use = [cols["x"], cols["y"]] + [c for c in (cols.get("county"), sa_col) if c]
+    df = pd.read_excel(wells[0], usecols=use)
+    df["_x"], df["_y"] = pd.to_numeric(df[cols["x"]], errors="coerce"), pd.to_numeric(df[cols["y"]], errors="coerce")
+    df = df[(df._x > 0) & (df._y > 0)]
+    df = df.sample(min(len(df), 3000), random_state=0).reset_index(drop=True)
+    best = None
+    for zone in (38, 39, 40, 41):
+        pts = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df._x, df._y), crs=f"EPSG:326{zone}").to_crs(sa_all.crs)
+        j = gpd.sjoin(pts, sa_all[["name", "code", "geometry"]], predicate="within")
+        if j.empty:
+            continue
+        score = len(j) / 1e6  # tie-breaker only
+        if cols.get("county") and ct_all is not None:
+            jc = gpd.sjoin(pts, ct_all[["county", "geometry"]].to_crs(sa_all.crs), predicate="within")
+            score += (jc[cols["county"]].map(norm) == jc.county).sum()
+        elif sa_col:
+            score += sum(1 for a, n in zip(j[sa_col].map(norm), j.name) if isinstance(a, str) and n and n in a)
+        if best is None or score > best[0]:
+            best = (score, j.code.value_counts().idxmax(), zone)
+    return (sa_all[sa_all.code == best[1]], best[2]) if best else (None, None)
+
+
 def scan(folder, name=None, key=None, log=print):
     folder = Path(folder).resolve()
     notes, cfg = [], {}
     if not folder.exists():
         raise FileNotFoundError(folder)
+    rel = lambda p: p.relative_to(folder).as_posix()  # noqa: E731
+    wells, dams = _excel_roles(folder)
 
-    # ---- shapefiles
+    # ---- country-wide layers (configs/_regional.yaml): never taken as this basin's own layers
+    reg = regional_spec({"basin": {"base_dir": str(folder)}})
+    reg_files = {Path(reg[k]["shapefile"]).resolve() for k in ("study_areas", "counties") if reg and k in reg}
+
+    # ---- shapefiles of the basin itself (layers with many features are country/province-wide)
     polys, points = [], []
     for p in _files(folder, {".shp"}):
+        if p.resolve() in reg_files:
+            continue
         try:
             info = pyogrio.read_info(p)
         except Exception:  # noqa: BLE001
             continue
         gt = (info.get("geometry_type") or "").lower()
         rec = {"path": p, "n": info.get("features", 0)}
-        (polys if "polygon" in gt else points if "point" in gt else []).append(rec)
-    if not polys:
-        raise ValueError("هیچ شیپ‌فایل پلیگونی پیدا نشد / no polygon shapefile found (sub-basins are required).")
+        if "polygon" in gt and rec["n"] <= 60:
+            polys.append(rec)
+        elif "point" in gt:
+            points.append(rec)
     ct_cands = sorted([p for p in polys if _hint(p["path"], CT_HINTS)], key=lambda p: -p["n"])
     sb_cands = [p for p in polys if p not in ct_cands]
     sb_cands.sort(key=lambda p: (-(p["n"] > 1), -_hint(p["path"], SB_HINTS), -p["path"].stat().st_mtime))
-    sb_file = sb_cands[0]["path"] if sb_cands else polys[0]["path"]
+    sb_file = sb_cands[0]["path"] if sb_cands else None
     ct_file = ct_cands[0]["path"] if ct_cands else None
-    rel = lambda p: p.relative_to(folder).as_posix()  # noqa: E731
+    cfg["basin"] = {"key": key, "name": name or folder.name, "base_dir": None}
+    cfg["spatial"] = {"snap_distance_m": 5000}
 
-    sb = gpd.read_file(sb_file)
-    tmp = {"basin": {}}
-    crs = basin_crs(tmp, sb)
-    sb_field = pick_field(sb, SUB_BASIN_ID_HINTS)
-    cfg["basin"] = {"key": key, "name": name or folder.name, "base_dir": None, "crs": crs}
-    cfg["spatial"] = {"sub_basins": {"shapefile": rel(sb_file), "id_field": sb_field or "auto"},
-                      "snap_distance_m": 5000}
-    log(f"sub-basins: {rel(sb_file)} (id field: {sb_field}, {len(sb)} polygons, CRS {crs})")
+    regional = read_regional(reg) if reg else {}
+    sa_all = regional.get("study_areas")
+    if sb_file:
+        sb = gpd.read_file(sb_file)
+        crs = basin_crs({"basin": {}}, sb)
+        sb_field = pick_field(sb, SUB_BASIN_ID_HINTS)
+        cfg["spatial"]["sub_basins"] = {"shapefile": rel(sb_file), "id_field": sb_field or "auto"}
+        log(f"sub-basins: {rel(sb_file)} (id field: {sb_field}, {len(sb)} polygons, CRS {crs})")
+        sb = sb.to_crs(crs)
+        own = find_study_area(sa_all, None, sb) if sa_all is not None else None
+    elif sa_all is not None and wells:
+        own, zone = _study_area_from_wells(sa_all, regional.get("counties"), wells)
+        if own is None:
+            raise ValueError("نه شیپ‌فایل زیرحوضه پیدا شد و نه محدوده مطالعاتی از روی چاه‌ها / no sub-basin "
+                             "shapefile and the study area could not be found from the wells.")
+        sb = own[["geometry"]].copy()
+        crs = f"EPSG:326{zone}"  # the zone the well coordinates are in
+        sb = sb.to_crs(crs)
+        notes.append("شیپ‌فایل زیرحوضه پیدا نشد؛ کل محدوده مطالعاتی یک زیرحوضه است / no sub-basin shapefile: "
+                     "the study area is used as a single sub-basin")
+    else:
+        raise ValueError("هیچ شیپ‌فایل زیرحوضه‌ای پیدا نشد / no sub-basin shapefile found (and no country-wide "
+                         "study-area layer in configs/_regional.yaml).")
+    cfg["basin"]["crs"] = crs
+    if own is not None:
+        r = own.iloc[0]
+        unique = (sa_all.name == r["name"]).sum() == 1
+        cfg["study_area"] = r["name"] if unique else r["code"]
+        log(f"study area: {r['name']} ({r['code']})")
     if ct_file:
         ct = gpd.read_file(ct_file)
         ct_field = pick_field(ct, COUNTY_NAME_HINTS, unique=False, prefer_persian=True)
         cfg["spatial"]["counties"] = {"shapefile": rel(ct_file), "name_field": ct_field, "fix_encoding": "auto"}
         log(f"counties: {rel(ct_file)} (name field: {ct_field})")
+    elif reg and "counties" in reg:
+        log("counties: country-wide layer (configs/_regional.yaml)")
     else:
         notes.append("شیپ‌فایل شهرستان‌ها پیدا نشد / no county shapefile found")
 
     # ---- dam points (inside the basin, with dam names)
-    basin_shape = sb.to_crs(crs).union_all().buffer(5000)
+    basin_shape = sb.union_all().buffer(5000)
     best = None
     for p in points:
         if not _hint(p["path"], DAM_HINTS):
@@ -122,19 +200,7 @@ def scan(folder, name=None, key=None, log=print):
         if inside and (best is None or inside > best[1]):
             best = (p["path"], inside, field)
 
-    # ---- excel files
-    xls = _files(folder, {".xls", ".xlsx", ".xlsm"})
-    wells, dams = None, None
-    for p in xls:
-        n = _is_dam_file(p)
-        if n and (dams is None or n > dams[1]):
-            dams = (p, n)
-    for p in xls:
-        if dams and p == dams[0]:
-            continue
-        s, cols = _well_score(p)
-        if s >= 50 and (wells is None or s > wells[1]):
-            wells = (p, s, cols)
+    # ---- excel files (detected above)
     if wells:
         cfg["wells"] = {"file": rel(wells[0]), "sheet": 0, "columns": wells[2], "unlocated": "county_majority"}
         log(f"wells: {rel(wells[0])} columns={wells[2]}")

@@ -11,6 +11,17 @@ and source type. The interface is available in **Persian (default) and English**
 | Dam statistics (start-of-year storage, inflow, uses, location) — one sheet per water year | `Amar_SAD.xlsx` | `wa/loaders.py` → `load_dams` |
 | Renewable surface / groundwater, aquifer storage change, inter-basin transfer | *Simaye Ab* PDFs (`Bilan/`) | `wa/simaye_ab.py` |
 | Sub-basins, counties, dam points | shapefiles (`shape/`) | `wa/spatial.py` |
+| All study areas and all counties of Iran (map context, look-up by name) | `shape/Basins/Mahdoude.shp`, `shape/shahrestan/shrestan.shp` | `configs/_regional.yaml` → `wa/spatial.py` → `read_regional` |
+
+### Country-wide layers
+`configs/_regional.yaml` points to the country-wide study-area and county shapefiles. They are shared by every
+basin and are used to
+- draw the neighbouring study areas and counties faintly on the map (within `context_buffer_km`);
+- find the basin's own study area by name or code (`study_area: مشهد` or `study_area: 6007` in the basin config);
+- stand in for missing files: a basin **without a sub-basin shapefile** uses its study area as a single sub-basin,
+  and a basin **without a county shapefile** takes its counties from the country-wide layer. When adding a basin
+  without shapefiles, the study area is found automatically from the well locations (the county column of the
+  well statistics is used to identify the UTM zone).
 
 All paths and column names live in one YAML file per basin (`configs/<basin>.yaml`); the code contains no file
 names. The sample Excel workbook is **not** used by the dashboard — only `validate_excel.py` reads it, to compare
@@ -28,7 +39,7 @@ about 10 seconds; after that every filter change takes under a second.
 | Charts | Sankey (source → use), withdrawal by use and source type, share of each use in consumption |
 | Annual trend | Withdrawal, resources, consumption and balance for every year with the same filters |
 | Sub-basin × county | Withdrawal and area of every county inside every sub-basin, plus a downloadable detail table |
-| Map | Sub-basins, county borders, wells and dams on OpenStreetMap, Esri satellite imagery or a plain (offline) background |
+| Map (first tab) | Sub-basins, the study area, county borders, wells and dams on OpenStreetMap, Esri satellite imagery or a plain (offline) background. A three-way **review mode** — *county view*, *sub-basin view*, *combined view* — switches the related layers on and the others off; every layer also has its own on/off button. Neighbouring study areas and counties are drawn faintly, as are the sub-basins/counties not selected in the filters. |
 | Data & quality control | Import warnings, the values read from each Simaye Ab PDF, dam statistics, downloads of all base data |
 
 Column layouts: *Excel template* (drinking & industry by county, the rest by sub-basin, as in DYNMIC), all uses by
@@ -56,8 +67,8 @@ The same code runs for any study area whose files are of the same kinds (they ma
 names, sheet names, coordinate systems, numbers of sub-basins, etc.).
 
 1. Put the basin's files in one folder (sub-folders are fine): the well Excel, the dam Excel (one sheet per
-   water year, e.g. `94-95` or `1394-95`), the Simaye Ab PDFs, and the sub-basin and county shapefiles
-   (optionally a dam-point shapefile).
+   water year, e.g. `94-95` or `1394-95`), the Simaye Ab PDFs, and — optionally — the sub-basin, county and
+   dam-point shapefiles (without them the country-wide layers are used, see above).
 2. In the sidebar open **Add a new basin**, enter the folder path and a name, and click *Scan folder & create
    config* — or run `..\.venv\Scripts\python.exe new_basin.py "<folder>" --name "<name>"`.
 3. The files, fields and coordinate system are detected automatically and `configs/<key>.yaml` is written,
@@ -87,6 +98,7 @@ dashboard/
   check_basin.py         health check of one or all basins
   validate_excel.py      comparison with the sample Excel's DYNMIC sheet
   configs/*.yaml         one config per basin
+  configs/_regional.yaml country-wide study-area / county layers shared by all basins
   wa/config.py           config loading and defaults (column aliases, use mapping, return coefficients)
   wa/detect.py           automatic detection of the input files
   wa/loaders.py          wells, dams, transfers, indicators

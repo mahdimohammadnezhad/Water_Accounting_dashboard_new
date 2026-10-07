@@ -8,11 +8,12 @@ import json
 import time
 import traceback
 
+import geopandas as gpd
 import pandas as pd
 from pyproj import Transformer
 
 from . import loaders, spatial
-from .config import clear_excel_cache, processed_dir, resolve_uses, signature, to_json
+from .config import clear_excel_cache, processed_dir, regional_spec, resolve_uses, signature, to_json
 from .text import natural_key
 
 TABLES = ["W", "RES", "indicators", "cells", "wells", "dams", "dam_stats", "simaye"]
@@ -34,11 +35,42 @@ def build(cfg, log=print):
     report = {"warnings": [], "info": {}}
     clear_excel_cache()
     log("shapefiles ...")
-    sb = spatial.load_sub_basins(cfg)  # required
-    ct = _step(report, "شیپ‌فایل شهرستان‌ها", "county shapefile", lambda: spatial.load_counties(cfg, sb), lambda: None)
+    reg_spec = regional_spec(cfg)
+    reg_name = ("لایه‌های سراسری (محدوده‌ها و شهرستان‌های کشور)", "country-wide layers")
+    if cfg["spatial"].get("sub_basins"):
+        sb = spatial.load_sub_basins(cfg)
+        report["info"]["sub-basin id field"] = cfg["spatial"]["sub_basins"].get("_id_field_used")
+        around = None
+        if reg_spec:  # read only the neighbourhood of the basin (fast)
+            around = gpd.GeoSeries([sb.union_all().buffer(reg_spec["context_buffer_km"] * 1500)], crs=sb.crs)
+        regional = _step(report, *reg_name, lambda: spatial.read_regional(reg_spec, around), dict)
+    else:  # no sub-basin shapefile: the study area found by name/code is the single sub-basin
+        regional = _step(report, *reg_name, lambda: spatial.read_regional(reg_spec), dict)
+        sa = spatial.find_study_area(regional.get("study_areas"), cfg.get("study_area"))
+        if sa is None:
+            raise ValueError(f"محدوده مطالعاتی «{cfg.get('study_area')}» در لایه سراسری پیدا نشد / "
+                             f"study area '{cfg.get('study_area')}' not found in the country-wide layer.")
+        sb = spatial.sub_basins_from_study_area(cfg, sa)
+        loaders.warn(report, "شیپ‌فایل زیرحوضه تعریف نشده؛ کل محدوده مطالعاتی یک زیرحوضه در نظر گرفته شد.",
+                     "No sub-basin shapefile: the whole study area is used as a single sub-basin.")
+    own_sa = _step(report, "محدوده مطالعاتی", "study area",
+                   lambda: spatial.find_study_area(regional.get("study_areas"), cfg.get("study_area"), sb), lambda: None)
+    if own_sa is not None:
+        r = own_sa.iloc[0]
+        report["info"]["study area"] = f"{r['name']} ({r['code']}{', ' + r['province'] if r['province'] else ''})"
+    if cfg["spatial"].get("counties"):
+        ct = _step(report, "شیپ‌فایل شهرستان‌ها", "county shapefile", lambda: spatial.load_counties(cfg, sb),
+                   lambda: None)
+    elif "counties" in regional:
+        ct = spatial.counties_from_regional(regional["counties"], sb)
+        report["info"]["counties"] = "country-wide layer"
+    else:
+        ct = None
     cells = spatial.cell_areas(sb, ct)
     report["info"]["crs"] = cfg["basin"]["crs"]
-    report["info"]["sub-basin id field"] = cfg["spatial"]["sub_basins"].get("_id_field_used")
+    context = _step(report, "لایه‌های اطراف", "context layers",
+                    lambda: spatial.context_layers(regional, sb, own_sa, ct, reg_spec["context_buffer_km"]),
+                    dict) if reg_spec else {}
 
     log("simaye ab pdf ...")
     simaye = _step(report, "PDFهای سیمای آب", "Simaye Ab PDFs", lambda: loaders.load_simaye(cfg, report),
@@ -102,7 +134,8 @@ def build(cfg, log=print):
     for k, df in tables.items():
         df.reset_index(drop=True).to_parquet(out / f"{k}.parquet", index=False)
     shapes = {"sub_basins": spatial.to_plot_shapes(sb.to_crs(4326), "sub_basin", tolerance=0.0015),
-              "counties": spatial.to_plot_shapes(ct.to_crs(4326), "county", tolerance=0.0015) if ct is not None else []}
+              "counties": spatial.to_plot_shapes(ct.to_crs(4326), "county", tolerance=0.0015) if ct is not None else [],
+              "study_area": [], "context_study_areas": [], "context_counties": [], **context}
     (out / "shapes.json").write_text(json.dumps(shapes, ensure_ascii=False), encoding="utf-8")
     # water years shown = years with well statistics or a Simaye Ab table (dam-only years are incomplete)
     no_simaye = sorted(set(wells.year.dropna()) - set(indicators.year.dropna()))

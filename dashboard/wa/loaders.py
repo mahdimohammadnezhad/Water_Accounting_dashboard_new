@@ -125,6 +125,14 @@ def load_wells(cfg, sub_basins, counties, report):
         warn(report, "بیشتر چاه‌ها بیرون از زیرحوضه‌ها افتاده‌اند؛ سیستم مختصات (basin.crs / wells.crs) را بررسی کنید.",
              "Most wells fall outside the sub-basins; check the coordinate system (basin.crs / wells.crs).")
     df["sub_basin"] = df.sub_basin.fillna(UNKNOWN)
+    neg = df[df.value < 0]
+    if len(neg):  # e.g. a negative «اضافه کسربرداشت» correction larger than the metered discharge
+        by_year = "، ".join(f"{y}: {n}" for y, n in neg.groupby("year").size().items())
+        by_year_en = ", ".join(f"{y}: {n}" for y, n in neg.groupby("year").size().items())
+        warn(report, f"{len(neg)} رکورد چاه برداشت منفی دارند (جمع {neg.value.sum():.3f} م.م.م؛ {by_year})؛ احتمالاً "
+                     f"اصلاحیه کسر/اضافه برداشت در آمار است. همان‌طور که در فایل آمده در جمع‌ها منظور شده‌اند.",
+             f"{len(neg)} well records have a negative withdrawal (total {neg.value.sum():.3f} MCM; {by_year_en}), "
+             f"probably over/under-abstraction corrections in the statistics. They are counted as given in the file.")
     report["info"]["wells: records"] = len(df)
     report["info"]["wells: sub-basin assignment"] = df.sb_method.value_counts().to_dict()
     return df[["year", "x", "y", "use", "county_attr", "county_geo", "sub_basin", "sb_method", "value"]]

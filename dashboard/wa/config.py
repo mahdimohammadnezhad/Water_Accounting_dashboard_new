@@ -109,8 +109,11 @@ def load_config(path):
     sp.setdefault("river_reach_label", "بازه رودخانه {id}")
     sp.setdefault("aquifer_label", "آبخوان زیرحوضه {id}")
     sp.setdefault("snap_distance_m", 5000)
-    if "sub_basins" not in sp:
-        raise ValueError(f"{path.name}: spatial.sub_basins (شیپ‌فایل زیرحوضه‌ها) تعریف نشده است.")
+    if "sub_basins" not in sp and not cfg.get("study_area"):
+        raise ValueError(f"{path.name}: spatial.sub_basins (شیپ‌فایل زیرحوضه‌ها) یا study_area (نام/کد محدوده مطالعاتی) "
+                         f"لازم است / define spatial.sub_basins or study_area.")
+    if cfg.get("study_area") is not None:
+        cfg["study_area"] = norm(cfg["study_area"])
 
     cfg["uses"] = [_complete_use(u) for u in cfg.get("uses") or []]
     cfg["county_outlet_reach"] = {norm(k): str(v) for k, v in (cfg.get("county_outlet_reach") or {}).items()}
@@ -123,6 +126,30 @@ def load_config(path):
 def resolve(cfg, rel):
     p = Path(rel)
     return p if p.is_absolute() else Path(cfg["basin"]["base_dir"]) / p
+
+
+REGIONAL_FILE = CONFIG_DIR / "_regional.yaml"
+
+
+def regional_spec(cfg):
+    """Country-wide study-area / county layers: basin config `regional:` or configs/_regional.yaml.
+    Returns the spec with absolute shapefile paths (missing files dropped), or None."""
+    if cfg.get("regional") is not None:
+        spec, base = dict(cfg["regional"] or {}), Path(cfg["basin"]["base_dir"])
+    elif REGIONAL_FILE.exists():
+        spec = yaml.safe_load(REGIONAL_FILE.read_text(encoding="utf-8")) or {}
+        base = (REGIONAL_FILE.parent / spec.get("base_dir", ".")).resolve()
+    else:
+        return None
+    out = {"context_buffer_km": float(spec.get("context_buffer_km", 150))}
+    for key in ("study_areas", "counties"):
+        layer = spec.get(key)
+        if layer and layer.get("shapefile"):
+            p = Path(layer["shapefile"])
+            p = p if p.is_absolute() else base / p
+            if p.exists():
+                out[key] = {**layer, "shapefile": str(p)}
+    return out if ("study_areas" in out or "counties" in out) else None
 
 
 def input_files(cfg):
@@ -152,6 +179,11 @@ def input_files(cfg):
         folder = resolve(cfg, cfg["simaye_ab"]["folder"])
         if folder.exists():
             files += sorted(folder.glob(cfg["simaye_ab"].get("pattern", "*.pdf")))
+    reg = regional_spec(cfg)
+    if reg:
+        files += [reg[k]["shapefile"] for k in ("study_areas", "counties") if k in reg]
+        if cfg.get("regional") is None:
+            files.append(REGIONAL_FILE)
     out = []
     for f in dict.fromkeys(files):
         p = resolve(cfg, f)

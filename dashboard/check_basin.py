@@ -15,6 +15,7 @@ import pandas as pd
 
 sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, str(Path(__file__).parent))
+from wa import charts  # noqa: E402
 from wa.build import get_base  # noqa: E402
 from wa.config import GROUP_ORDER, list_configs, load_config  # noqa: E402
 from wa.engine import compute  # noqa: E402
@@ -52,6 +53,13 @@ for path in paths:
                         to_html(t, lang="en")
                         to_excel_bytes({"t": t}, "check")
                         rows.append({"mode": mode, "year": y, **{k: round(v, 2) for k, v in tot.items()}})
+                # the map for this year (all review modes, both languages)
+                wells = base["wells"].assign(county=base["wells"]["county_attr" if mode == "attribute" else "county_geo"])
+                wy = wells[wells.year == y]
+                for mm in charts.MAP_MODES:
+                    for lg in ("fa", "en"):
+                        charts.basin_map(base["shapes"], meta["sub_basins"], counties, wy, base["dams"],
+                                         [u["name"] for u in uses], cfg["spatial"]["sub_basin_label"], "osm", lg, mm)
                 # every sub-basin and county alone
                 for sb in meta["sub_basins"]:
                     build_table(base, cfg, uses, W, RET, RES, y, [sb], counties, [u["name"] for u in uses],

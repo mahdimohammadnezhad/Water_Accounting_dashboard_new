@@ -148,35 +148,82 @@ def _lines(rings):
     return lon, lat
 
 
-def basin_map(shapes, sbs_sel, wells, dams, uses_order, sb_label, basemap="osm", lang="fa",
-              show_sb=True, show_ct=True, show_wells=True, show_dams=True):
+MAP_MODES = ["county", "sub_basin", "combined"]
+# which layers each review mode switches on (the user can still toggle every layer afterwards)
+MODE_LAYERS = {
+    "county": dict(sb=False, ct=True, ctx_sa=False, ctx_ct=True, wells=True, dams=True),
+    "sub_basin": dict(sb=True, ct=False, ctx_sa=True, ctx_ct=False, wells=True, dams=True),
+    "combined": dict(sb=True, ct=True, ctx_sa=True, ctx_ct=True, wells=True, dams=True),
+}
+
+
+def _context_trace(fig, shapes, color, name, group, title, hover_prefix, lang, sat):
+    """All neighbouring polygons as one faint trace + invisible hover points at their centres."""
+    if not shapes:
+        return
+    lon, lat = _lines([r for s in shapes for r in s["rings"]])
+    fig.add_scattermap(lon=lon, lat=lat, mode="lines", fill="toself", fillcolor=_rgba(color, 0.07),
+                       line=dict(color=_rgba(color, 0.95 if sat else 0.75), width=1.7), name=name,
+                       legendgroup=group, legendgrouptitle_text=title, hoverinfo="skip")
+    labels = [term(s["id"], lang) + (f" — {s['province']}" if s.get("province") and lang == "fa" else "")
+              for s in shapes]
+    fig.add_scattermap(lon=[s["label_xy"][0] for s in shapes], lat=[s["label_xy"][1] for s in shapes],
+                       mode="markers", marker=dict(size=6, color=_rgba(color, 0.4)), text=labels, name=name,
+                       legendgroup=group, showlegend=False,
+                       hovertemplate=f"{hover_prefix}: %{{text}}<extra></extra>")
+
+
+def basin_map(shapes, sbs_sel, counties_sel, wells, dams, uses_order, sb_label, basemap="osm", lang="fa",
+              mode="combined", layers=None):
+    """mode: county | sub_basin | combined. layers: dict of sb, ct, ctx_sa, ctx_ct, wells, dams (bool)."""
+    lay = dict(MODE_LAYERS[mode], **(layers or {}))
     fig = go.Figure()
     sat = basemap == "satellite"
-    all_pts = []
-    for s in shapes["sub_basins"]:
-        all_pts += [p for r in s["rings"] for p in r]
-    if show_sb:
+    # ---- faint neighbourhood
+    if lay["ctx_sa"]:
+        _context_trace(fig, shapes.get("context_study_areas", []), "#2563eb" if not sat else "#bfdbfe",
+                       t("lg_ctx_sa", lang), "ctx_sa", t("lg_ctx_sa", lang), t("hv_study_area", lang), lang, sat)
+    if lay["ctx_ct"]:
+        _context_trace(fig, shapes.get("context_counties", []), "#9a3412" if not sat else "#fde68a",
+                       t("lg_ctx_ct", lang), "ctx_ct", t("lg_ctx_ct", lang), t("hv_county", lang), lang, sat)
+    # ---- the study area outline (sub-basin and combined views)
+    if lay["sb"]:
+        for s in shapes.get("study_area", []):
+            lon, lat = _lines(s["rings"])
+            fig.add_scattermap(lon=lon, lat=lat, mode="lines", line=dict(color="#0b3a5b" if not sat else "#ffffff",
+                                                                         width=3.5),
+                               name=f"{t('hv_study_area', lang)} {term(s['id'], lang)}", legendgroup="sa",
+                               legendgrouptitle_text=t("hv_study_area", lang), hoverinfo="name")
+    # ---- sub-basins
+    if lay["sb"]:
         for i, s in enumerate(sorted(shapes["sub_basins"], key=lambda s: natural_key(s["id"]))):
             on = s["id"] in sbs_sel
             lon, lat = _lines(s["rings"])
             c = SB_COLORS[i % len(SB_COLORS)]
             fig.add_scattermap(lon=lon, lat=lat, mode="lines", fill="toself",
-                               fillcolor=_rgba(c, 0.28 if on else 0.06),
-                               line=dict(color=c if on else "#94a3b8", width=3 if on else 1.5),
+                               fillcolor=_rgba(c, 0.30 if on else 0.05),
+                               line=dict(color=c if on else "#94a3b8", width=3 if on else 1.2),
                                name=term(sb_label.format(id=s["id"]), lang), legendgroup="sb",
                                legendgrouptitle_text=t("lg_sb", lang), hoverinfo="name")
-    if show_ct:
+    # ---- counties of the basin: filled in the county view, outlines in the combined view
+    if lay["ct"]:
+        filled = mode == "county"
         for i, s in enumerate(sorted(shapes["counties"], key=lambda s: s["id"])):
+            on = s["id"] in counties_sel
             lon, lat = _lines(s["rings"])
             c = COUNTY_COLORS[i % len(COUNTY_COLORS)]
             name = term(s["id"], lang)
-            fig.add_scattermap(lon=lon, lat=lat, mode="lines", line=dict(color=c, width=3 if sat else 2.2),
-                               name=name, legendgroup="ct", legendgrouptitle_text=t("lg_ct", lang), hoverinfo="name")
+            kw = dict(fill="toself", fillcolor=_rgba(c, 0.32 if on else 0.05)) if filled else {}
+            fig.add_scattermap(lon=lon, lat=lat, mode="lines", name=name, legendgroup="ct",
+                               line=dict(color=c if on else "#94a3b8", width=(3 if sat else 2.4) if on else 1.2),
+                               legendgrouptitle_text=t("lg_ct", lang), hoverinfo="name", **kw)
             fig.add_scattermap(lon=[s["label_xy"][0]], lat=[s["label_xy"][1]], mode="markers",
-                               marker=dict(size=11, color=c, opacity=0.95), name=name, legendgroup="ct",
-                               showlegend=False, hovertemplate=f"{t('hv_county', lang)}: {name}<extra></extra>")
+                               marker=dict(size=11 if on else 7, color=c if on else "#94a3b8", opacity=0.95),
+                               name=name, legendgroup="ct", showlegend=False,
+                               hovertemplate=f"{t('hv_county', lang)}: {name}<extra></extra>")
+    # ---- wells and dams
     col = use_colors(uses_order)
-    if show_wells and len(wells):
+    if lay["wells"] and len(wells):
         agg = wells.dropna(subset=["lon"]).groupby(["lon", "lat", "use", "county", "sub_basin"],
                                                   as_index=False).value.sum()
         for u in uses_order:
@@ -186,24 +233,28 @@ def basin_map(shapes, sbs_sel, wells, dams, uses_order, sb_label, basemap="osm",
             un = term(u, lang)
             fig.add_scattermap(lon=d.lon, lat=d.lat, mode="markers", name=un, legendgroup="w",
                                legendgrouptitle_text=t("lg_wells", lang),
-                               marker=dict(color=col[u], size=np.clip(np.sqrt(d.value) * 14, 3, 11), opacity=0.6),
+                               # negative withdrawals (corrections in the source data) get the smallest marker
+                               marker=dict(color=col[u], opacity=0.6,
+                                           size=np.clip(np.sqrt(d.value.clip(lower=0).fillna(0)) * 14, 3, 11)),
                                customdata=np.stack([d.county.map(lambda v: term(v, lang)),
                                                     d.sub_basin, d.value], axis=1),
                                hovertemplate=f"{t('hv_well', lang)} {un}<br>{t('hv_county', lang)}: %{{customdata[0]}}"
                                              f"<br>{t('sub_basin', lang)}: %{{customdata[1]}}"
                                              f"<br>%{{customdata[2]:.3f}} {t('unit_short', lang)}<extra></extra>")
-    if show_dams:
+    if lay["dams"]:
         d = dams.dropna(subset=["lon"])
         if len(d):
             fig.add_scattermap(lon=d.lon, lat=d.lat, mode="markers", name=t("dam", lang),
                                marker=dict(size=17, color="#1d4ed8", symbol="circle"),
                                text=[term(x, lang) for x in d.dam], hovertemplate="%{text}<extra></extra>",
                                legendgroup="d", legendgrouptitle_text=t("lg_dams", lang))
+    # ---- view: fit the basin
+    all_pts = [p for s in shapes["sub_basins"] for r in s["rings"] for p in r]
     if all_pts:
         lons, lats = [p[0] for p in all_pts], [p[1] for p in all_pts]
         center = dict(lon=(min(lons) + max(lons)) / 2, lat=(min(lats) + max(lats)) / 2)
         span = max(max(lons) - min(lons), (max(lats) - min(lats)) * 1.3, 1e-3)
-        zoom = max(1, min(14, math.log2(360 / span) + 0.2))
+        zoom = max(1, min(14, math.log2(360 / span) - 0.25))
     else:
         center, zoom = dict(lon=59.4, lat=36.4), 7.5
     map_kw = dict(center=center, zoom=zoom)
@@ -215,11 +266,11 @@ def basin_map(shapes, sbs_sel, wells, dams, uses_order, sb_label, basemap="osm",
     else:
         map_kw["style"] = "white-bg"
     right = lang == "fa"
-    fig.update_layout(map=map_kw, height=720, margin=dict(l=0, r=0, t=0, b=0), font=dict(family=FONT),
+    fig.update_layout(map=map_kw, height=740, margin=dict(l=0, r=0, t=0, b=0), font=dict(family=FONT),
                       legend=dict(x=0.995 if right else 0.005, xanchor="right" if right else "left", y=0.99,
                                   bgcolor="rgba(255,255,255,0.88)", bordercolor="#cbd5e1", borderwidth=1,
                                   font=dict(size=12), groupclick="toggleitem"),
-                      hoverlabel=dict(font_family=FONT))
+                      hoverlabel=dict(font_family=FONT), uirevision=mode)
     return fig
 
 

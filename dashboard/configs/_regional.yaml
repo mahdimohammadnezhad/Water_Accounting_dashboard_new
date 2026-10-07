@@ -1,0 +1,18 @@
+# =============================================================================
+# لایه‌های سراسری (همه محدوده‌های مطالعاتی و همه شهرستان‌های کشور) — مشترک بین همه حوضه‌ها
+# Country-wide layers shared by every basin:
+#   * shown faintly on the map around the selected basin (other study areas / other counties)
+#   * used to find a basin's study area and counties by name (basin config: `study_area: مشهد` or a code)
+#   * a basin without its own sub-basin or county shapefile falls back to these layers
+# Paths are relative to base_dir (which is relative to this file). Missing files are simply skipped.
+# =============================================================================
+base_dir: ../..
+study_areas:
+  shapefile: shape/Basins/Mahdoude.shp
+  name_field: Mah_Name         # نام محدوده مطالعاتی
+  code_field: Mah_code         # کد محدوده
+  province_field: os_moteval   # استان
+counties:
+  shapefile: shape/shahrestan/shrestan.shp
+  name_field: PER_NAM
+context_buffer_km: 150         # محدوده‌ها و شهرستان‌های اطراف تا این فاصله روی نقشه نمایش داده می‌شوند

@@ -132,14 +132,30 @@ UI = {
     "dl_detail": ("⬇️ دانلود این جدول (Excel)", "⬇️ Download this table (Excel)"),
     "total": ("جمع", "Total"),
     "basemap": ("نقشه پایه", "Basemap"),
-    "lyr_sb": ("زیرحوضه‌ها", "Sub-basins"),
-    "lyr_ct": ("مرز شهرستان‌ها", "County borders"),
+    "map_mode": ("نوع بررسی", "Review mode"),
+    "mode_county": ("🏛️ بررسی شهرستانی", "🏛️ County view"),
+    "mode_sub_basin": ("💧 بررسی زیرحوضه‌ای", "💧 Sub-basin view"),
+    "mode_combined": ("🧩 بررسی ترکیبی", "🧩 Combined view"),
+    "map_layers": ("لایه‌ها", "Layers"),
+    "lyr_sb": ("زیرحوضه‌ها و محدوده", "Sub-basins / area"),
+    "lyr_ct": ("شهرستان‌های محدوده", "Counties of the area"),
+    "lyr_ctx_sa": ("سایر محدوده‌های مطالعاتی", "Other study areas"),
+    "lyr_ctx_ct": ("سایر شهرستان‌ها", "Other counties"),
     "lyr_wells": ("چاه‌ها", "Wells"),
     "lyr_dams": ("سدها", "Dams"),
+    "lg_ctx_sa": ("سایر محدوده‌های مطالعاتی", "Other study areas"),
+    "lg_ctx_ct": ("سایر شهرستان‌ها", "Other counties"),
+    "hv_study_area": ("محدوده مطالعاتی", "Study area"),
     "map_note": ("نقشه پایه OpenStreetMap و ماهواره‌ای (Esri) به اینترنت نیاز دارند؛ حالت «ساده» بدون اینترنت کار می‌کند. "
-                 "با کلیک روی نام‌ها در راهنمای نقشه هر لایه خاموش/روشن می‌شود.",
-                 "The OpenStreetMap and satellite (Esri) basemaps need internet; 'Plain' works offline. Click names "
-                 "in the map legend to toggle layers."),
+                 "«نوع بررسی» لایه‌های مربوط را روشن و بقیه را خاموش می‌کند؛ هر لایه را با دکمه‌های بالای نقشه یا کلیک "
+                 "روی نامش در راهنمای نقشه هم می‌توان خاموش/روشن کرد. محدوده‌ها و شهرستان‌های اطراف (تا فاصله "
+                 "تعیین‌شده در configs/_regional.yaml) کم‌رنگ نمایش داده می‌شوند و زیرحوضه‌ها/شهرستان‌هایی که در فیلتر "
+                 "انتخاب نشده‌اند هم کم‌رنگ‌اند.",
+                 "The OpenStreetMap and satellite (Esri) basemaps need internet; 'Plain' works offline. The review mode "
+                 "switches the related layers on and the others off; every layer can also be toggled with the buttons "
+                 "above the map or by clicking its name in the legend. Neighbouring study areas and counties (within the "
+                 "distance set in configs/_regional.yaml) are drawn faintly, as are sub-basins/counties not selected "
+                 "in the filters."),
     "qc_simaye": ("جدول بیلان سیمای آب (خوانده‌شده از PDFها)", "Simaye Ab balance table (read from the PDFs)"),
     "qc_dams": ("سدها و موقعیت آنها", "Dams and their location"),
     "qc_info": ("جزئیات ورود داده", "Data import details"),

@@ -12,6 +12,10 @@ basin:
   base_dir: ../..            # پوشه داده‌ها نسبت به همین فایل (D:\Term2\WERI\Water_Accounting)
   crs: EPSG:32640            # سیستم مختصات کاری (UTM 40N)
 
+# نام (یا کد) محدوده مطالعاتی در لایه سراسری محدوده‌ها (configs/_regional.yaml) — برای نمایش روی نقشه.
+# اگر شیپ‌فایل زیرحوضه نباشد، همین محدوده به‌عنوان تنها زیرحوضه استفاده می‌شود.
+study_area: مشهد
+
 spatial:
   sub_basins:
     shapefile: shape/final_boundary_fixed.shp
