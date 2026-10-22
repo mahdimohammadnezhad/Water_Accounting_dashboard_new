@@ -40,6 +40,7 @@ about 10 seconds; after that every filter change takes under a second.
 | Annual trend | Withdrawal, resources, consumption and balance for every year with the same filters |
 | Sub-basin × county | Withdrawal and area of every county inside every sub-basin, plus a downloadable detail table |
 | Map (first tab) | Sub-basins, the study area, county borders, wells and dams on OpenStreetMap, Esri satellite imagery or a plain (offline) background. A three-way **review mode** — *county view*, *sub-basin view*, *combined view* — switches the related layers on and the others off; every layer also has its own on/off button. Neighbouring study areas and counties are drawn faintly, as are the sub-basins/counties not selected in the filters. |
+| Management scenarios | Levers applied instantly: change of each use's withdrawal, of all groundwater pumping, closing illegal wells, reusing treated wastewater in agriculture instead of groundwater, changing the inter-basin transfer, wet/dry climate; for the whole basin or the selected area only. Presets (agriculture −20 %, close illegal wells, reuse, drought, combined package). Baseline-vs-scenario cards, withdrawal by use, aquifer deficit and balance over all years, effect by sub-basin. A switch applies the scenario to every tab. |
 | Data & quality control | Import warnings, the values read from each Simaye Ab PDF, dam statistics, downloads of all base data |
 
 Column layouts: *Excel template* (drinking & industry by county, the rest by sub-basin, as in DYNMIC), all uses by
@@ -61,6 +62,21 @@ county, all uses by sub-basin, or by use only. Return-flow coefficients can be e
   Half of Mashhad's urban drinking return is reported as treatment-plant output.
 - **Consumption (C)** = withdrawal − return; **balance check (B)** = available volume of dams, groundwater and
   transfers − consumption.
+
+## Uncertainty bands
+Every input gets an assumed relative error (1σ, editable in the sidebar or per basin under `uncertainty:`):
+metered wells 5 %, unmetered wells 20 %, illegal wells 30 % (from the *smart meter* and *well status* columns of
+the well statistics), dam statistics 5 %, transfer 10 %, Simaye Ab renewable surface 15 % / groundwater 20 % /
+storage change 25 %, return coefficients 20 %. They are propagated by Monte Carlo (400 samples) through the same
+calculation, so withdrawal, return, consumption, resources and the balance check stay consistent. The 90 % range
+(5–95 %) is shown under the KPI cards, as error bars on bar charts, as shaded bands on trend lines and in one line
+under the balance table; the main numbers remain the best estimates. The bands can be switched off in the sidebar.
+
+## Management scenarios
+The scenario changes the processed data and reruns the normal engine (`wa/scenario.py`). A lower withdrawal also
+lowers its return flow; reused effluent replaces agricultural groundwater pumping; the climate lever scales
+renewable water and dam inflows. The scenario aquifer deficit is the observed deficit (−ΔS) plus the change in
+groundwater withdrawal, minus the change in return flow reaching the aquifers, minus the change in recharge.
 
 ## Adding another basin
 The same code runs for any study area whose files are of the same kinds (they may use other file names, column
@@ -106,6 +122,8 @@ dashboard/
   wa/spatial.py          sub-basins / counties, spatial assignment, areas
   wa/engine.py           balance engine and return flows
   wa/table.py            sources-and-uses table, conditional formatting, Excel export
+  wa/uncertainty.py      Monte Carlo uncertainty bands
+  wa/scenario.py         management scenarios
   wa/charts.py, wa/ui.py charts, map, layout
   wa/i18n.py             Persian / English texts and vocabulary
   static/fonts/          Vazirmatn font (served locally, no internet needed)

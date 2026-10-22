@@ -1,7 +1,7 @@
 """HTML/CSS pieces of the dashboard (Vazirmatn, RTL/LTR, banner, cards)."""
 from html import escape
 
-from .i18n import num
+from .i18n import num, t
 
 _BASE = """
 <style>
@@ -41,6 +41,11 @@ section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] { padding-
 .wa-card .val small { font-size: .78rem; font-weight: 500; color: #94a3b8; margin: 0 4px; }
 .wa-card .note { font-size: .76rem; color: #94a3b8; }
 .wa-card.neg .val { color: #b42318; } .wa-card.pos .val { color: #047857; }
+.wa-card .band { font-size: .76rem; color: #475569; background: #f1f5f9; border-radius: 6px; padding: 1px 7px;
+                 display: inline-block; margin: 1px 0 3px 0; }
+.wa-card .delta { font-size: .95rem; font-weight: 700; }
+.wa-scen-head { background: #ecfeff; border: 1px solid #a5f3fc; border-radius: 12px; padding: 10px 14px;
+                margin-bottom: 8px; color: #155e75; font-size: .88rem; }
 @media (max-width: 1100px) { .wa-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* tabs */
@@ -114,14 +119,40 @@ def hero(title, subtitle, chips):
             f'<div class="wa-chips">{c}</div></div>')
 
 
+def band_text(band, lang):
+    if not band:
+        return ""
+    lo, hi = band
+    return t("band", lang, lo=num(lo, lang, "{:,.0f}"), hi=num(hi, lang, "{:,.0f}"))
+
+
 def cards(items, lang, unit):
-    """items: list of dicts {label, value, color, icon?, note?, tone?}"""
+    """items: list of dicts {label, value, color, icon?, note?, tone?, band? (lo, hi)}"""
     out = []
     for it in items:
         note = f'<div class="note">{escape(it["note"])}</div>' if it.get("note") else '<div class="note">&nbsp;</div>'
+        band = f'<div class="band">{escape(band_text(it["band"], lang))}</div>' if it.get("band") else ""
         out.append(f'<div class="wa-card {it.get("tone", "")}" style="--c:{it["color"]}"><div class="lbl">'
                    f'{it.get("icon", "")} {escape(it["label"])}</div><div class="val">{num(it["value"], lang)}'
-                   f'<small>{escape(unit)}</small></div>{note}</div>')
+                   f'<small>{escape(unit)}</small></div>{band}{note}</div>')
+    return f'<div class="wa-cards">{"".join(out)}</div>'
+
+
+def compare_cards(items, lang, unit):
+    """Scenario cards. items: {label, base, scen, color, icon?, better: 'lower'|'higher', band?}"""
+    out = []
+    for it in items:
+        d = it["scen"] - it["base"]
+        good = (d < 0) if it.get("better") == "lower" else (d > 0)
+        tone = "#047857" if (good and abs(d) > 1e-6) else ("#b42318" if abs(d) > 1e-6 else "#64748b")
+        pct = f" ({num(100 * d / abs(it['base']), lang, '{:+.0f}')}٪)" if abs(it["base"]) > 1e-9 else ""
+        if lang != "fa":
+            pct = pct.replace("٪", "%")
+        band = f'<div class="band">{escape(band_text(it.get("band"), lang))}</div>' if it.get("band") else ""
+        out.append(f'<div class="wa-card" style="--c:{it["color"]}"><div class="lbl">{it.get("icon", "")} '
+                   f'{escape(it["label"])}</div><div class="val">{num(it["scen"], lang)}<small>{escape(unit)}</small></div>'
+                   f'<div class="delta" style="color:{tone}">{num(d, lang, "{:+,.1f}")}{pct}</div>{band}'
+                   f'<div class="note">{escape(t("base", lang))}: {num(it["base"], lang)}</div></div>')
     return f'<div class="wa-cards">{"".join(out)}</div>'
 
 

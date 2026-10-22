@@ -11,8 +11,8 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 
-from .config import (DEFAULT_DAM_USE_MAP, DEFAULT_USE_MAP, WELL_COLUMN_ALIASES, excel_file, read_table,
-                     resolve)
+from .config import (DEFAULT_DAM_USE_MAP, DEFAULT_USE_MAP, ILLEGAL_WORDS, METER_YES_WORDS, WELL_COLUMN_ALIASES,
+                     excel_file, read_table, resolve)
 from .simaye_ab import read_folder
 from .spatial import UNKNOWN, assign
 from .text import auto_fix_names, norm, norm_year, sheet_year
@@ -73,6 +73,17 @@ def load_wells(cfg, sub_basins, counties, report):
         factor = 1e-6 if len(nz) and nz.median() > 100 else 1.0
         report["info"]["wells: value factor (auto)"] = factor
     df["value"] = df.value.fillna(0) * float(factor)
+
+    # uncertainty / scenario class: gw_i = illegal, gw_m = metered, gw_u = unmetered, gw = unknown
+    cls = pd.Series("gw", index=df.index, dtype=object)
+    if "meter" in df:
+        cls[:] = "gw_u"
+        cls[df.meter.map(lambda v: isinstance(norm(v), str) and norm(v).lower() in METER_YES_WORDS)] = "gw_m"
+    if "status" in df:
+        illegal = df.status.map(lambda v: isinstance(norm(v), str) and any(x in norm(v) for x in ILLEGAL_WORDS))
+        cls[illegal] = "gw_i"
+    df["cls"] = cls
+    report["info"]["wells: classes (records)"] = cls.value_counts().to_dict()
 
     # spatial assignment once per unique location
     crs = w.get("crs") or cfg["basin"]["crs"]
@@ -135,7 +146,7 @@ def load_wells(cfg, sub_basins, counties, report):
              f"probably over/under-abstraction corrections in the statistics. They are counted as given in the file.")
     report["info"]["wells: records"] = len(df)
     report["info"]["wells: sub-basin assignment"] = df.sb_method.value_counts().to_dict()
-    return df[["year", "x", "y", "use", "county_attr", "county_geo", "sub_basin", "sb_method", "value"]]
+    return df[["year", "x", "y", "use", "county_attr", "county_geo", "sub_basin", "sb_method", "cls", "value"]]
 
 
 # --------------------------------------------------------------------------- dams

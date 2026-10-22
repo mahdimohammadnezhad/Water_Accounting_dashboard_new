@@ -17,7 +17,7 @@ from .config import clear_excel_cache, processed_dir, regional_spec, resolve_use
 from .text import natural_key
 
 TABLES = ["W", "RES", "indicators", "cells", "wells", "dams", "dam_stats", "simaye"]
-WELL_COLS = ["year", "x", "y", "use", "county_attr", "county_geo", "sub_basin", "sb_method", "value"]
+WELL_COLS = ["year", "x", "y", "use", "county_attr", "county_geo", "sub_basin", "sb_method", "cls", "value"]
 DAM_META_COLS = ["dam", "sub_basin", "location_county", "county", "x", "y"]
 
 
@@ -86,10 +86,10 @@ def build(cfg, log=print):
     log("wells ...")
     wells = _step(report, "آمار چاه‌ها", "well statistics", lambda: loaders.load_wells(cfg, sb, ct, report),
                   lambda: pd.DataFrame(columns=WELL_COLS)) if cfg.get("wells") else pd.DataFrame(columns=WELL_COLS)
-    gw_W = wells.groupby(["year", "use", "county_attr", "county_geo", "sub_basin"], as_index=False).value.sum()
+    gw_W = wells.groupby(["year", "use", "county_attr", "county_geo", "sub_basin", "cls"], as_index=False).value.sum()
     gw_W.insert(1, "source_group", "gw")
     gw_W.insert(2, "source_name", gw_W.sub_basin.map(lambda s: cfg["spatial"]["aquifer_label"].format(id=s)))
-    W_main = pd.concat([dam_W, gw_W[loaders.W_COLS]], ignore_index=True)
+    W_main = pd.concat([dam_W, gw_W[loaders.W_COLS + ["cls"]]], ignore_index=True)
 
     log("transfers, special uses, indicators ...")
     empty_pair = lambda: (pd.DataFrame(columns=loaders.W_COLS), pd.DataFrame(columns=loaders.RES_COLS))  # noqa: E731
@@ -105,6 +105,8 @@ def build(cfg, log=print):
     W = pd.concat([W_main, tr_W, sp_W], ignore_index=True)
     W["value"] = pd.to_numeric(W.value, errors="coerce").fillna(0.0)
     W = W[W.year.notna()]
+    # uncertainty/scenario class of every withdrawal (wells: gw_m/gw_u/gw_i/gw; else the source group)
+    W["cls"] = (W["cls"] if "cls" in W else pd.Series(None, index=W.index)).fillna(W.source_group)
     RES = pd.concat([dam_RES, gw_RES, tr_RES], ignore_index=True)
     RES["value"] = pd.to_numeric(RES.value, errors="coerce").fillna(0.0)
     if W.empty:

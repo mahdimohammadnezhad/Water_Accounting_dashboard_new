@@ -37,6 +37,33 @@ WELL_COLUMN_ALIASES = {
     "y": ["MA_YUTM", "YUTM", "Y_UTM", "UTM_Y", "Northing", "Y", "عرض"],
     "use": ["نوع مصرف", "مصرف", "use", "type of use", "kind of use"],
     "value": ["برداشت واقعی", "برداشت", "تخلیه مترمکعب", "تخلیه", "withdrawal", "value", "volume"],
+    # optional: used for uncertainty (metered wells are more certain) and scenarios (closing illegal wells)
+    "meter": ["کنتور هوشمند", "کنتور", "meter", "smart meter"],
+    "status": ["وضعیت چاه", "وضعیت", "status", "legal status"],
+}
+WELL_REQUIRED = ["year", "x", "y", "use", "value"]
+ILLEGAL_WORDS = ["غیرمجاز", "غیر مجاز", "illegal", "unauthorized"]
+METER_YES_WORDS = ["دارد", "بله", "yes", "true", "1"]
+
+# Uncertainty assumptions: 1-sigma relative error (%) of each input; editable in the sidebar and per basin
+# (`uncertainty:` in the basin config). Propagated by Monte Carlo; bands show the 5-95 % range.
+DEFAULT_UNCERTAINTY = {
+    "level": 90,
+    "samples": 400,
+    "relative_sd": {
+        "gw_m": 5,            # wells with a smart meter
+        "gw_u": 20,           # legal wells without a meter (hours x discharge estimate)
+        "gw_i": 30,           # illegal wells
+        "gw": 15,             # wells whose meter/status is unknown
+        "dam": 5,             # dam statistics (releases, storage, inflow)
+        "transfer": 10,       # inter-basin transfer
+        "treatment": 10,      # treatment-plant output / reuse
+        "special": 10,        # other tabular withdrawals
+        "renew_surface": 15,  # Simaye Ab: renewable surface water
+        "renew_ground": 20,   # Simaye Ab: renewable groundwater (recharge)
+        "storage_change": 25, # Simaye Ab: aquifer storage change (ΔS)
+        "return_coef": 20,    # return-flow coefficients
+    },
 }
 DEFAULT_USE_MAP = {
     "کشاورزی": "کشاورزی", "دام و طیور": "کشاورزی", "دامداری": "کشاورزی", "آبزی پروری": "کشاورزی",
@@ -120,6 +147,11 @@ def load_config(path):
     cfg.setdefault("balance_source_groups", ["dam", "gw", "transfer"])
     cfg.setdefault("treatment_label", "تصفیه خانه")
     cfg.setdefault("county_mode_default", "attribute")
+    unc = copy.deepcopy(DEFAULT_UNCERTAINTY)
+    custom = cfg.get("uncertainty") or {}
+    unc["relative_sd"].update(custom.get("relative_sd") or {})
+    unc.update({k: v for k, v in custom.items() if k != "relative_sd"})
+    cfg["uncertainty"] = unc
     return cfg
 
 

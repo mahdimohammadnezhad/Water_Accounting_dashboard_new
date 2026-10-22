@@ -29,7 +29,7 @@ def select_county(df, mode):
 def compute(base, cfg, uses, mode):
     """uses: list of use dicts (possibly with user-edited coefficients). Returns W, RET, RES."""
     W = select_county(base["W"], mode)
-    W = W.groupby(KEY, as_index=False).value.sum()
+    W = W.groupby(KEY + (["cls"] if "cls" in W else []), as_index=False).value.sum()
     RET = _returns(W, uses, cfg["county_outlet_reach"])
     sp = cfg["spatial"]
     labels = {"river": sp["river_reach_label"], "gw": sp["aquifer_label"]}

@@ -18,6 +18,24 @@ BASEMAPS = ["osm", "satellite", "plain"]
 ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
 
 
+def _err_trace(fig, x, y, band, lang, color="#0f172a", name_key="band_short", showlegend=True):
+    """Invisible markers at the bar/point totals carrying the 90% range as error bars."""
+    lo = np.array([b[0] for b in band], dtype=float)
+    hi = np.array([b[1] for b in band], dtype=float)
+    y = np.array(y, dtype=float)
+    fig.add_scatter(x=x, y=y, mode="markers", marker=dict(size=1, color=color), name=t(name_key, lang),
+                    showlegend=showlegend,
+                    error_y=dict(type="data", array=np.clip(hi - y, 0, None), arrayminus=np.clip(y - lo, 0, None),
+                                 color=color, thickness=1.6, width=6),
+                    customdata=np.stack([lo, hi], axis=1),
+                    hovertemplate="%{x}<br>%{y:,.1f} (%{customdata[0]:,.1f} – %{customdata[1]:,.1f})<extra></extra>")
+
+
+def _band_fill(fig, x, lo, hi, color, name):
+    fig.add_scatter(x=list(x) + list(x)[::-1], y=list(hi) + list(lo)[::-1], fill="toself", mode="lines",
+                    line=dict(width=0), fillcolor=_rgba(color, 0.14), hoverinfo="skip", showlegend=False, name=name)
+
+
 def use_colors(uses):
     return {u: USE_COLORS[i % len(USE_COLORS)] for i, u in enumerate(uses)}
 
@@ -61,7 +79,7 @@ def sankey(Wf, uses_order, lang="fa"):
     return _layout(fig, lang, 540, t("ch_sankey", lang))
 
 
-def bar_use_by_group(Wf, uses_order, lang="fa"):
+def bar_use_by_group(Wf, uses_order, lang="fa", bands=None):
     d = Wf.groupby(["use", "source_group"], as_index=False).value.sum()
     order = [u for u in uses_order if u in set(d.use)]
     fig = go.Figure()
@@ -71,11 +89,14 @@ def bar_use_by_group(Wf, uses_order, lang="fa"):
             name = term(GROUP_LABELS[g], lang)
             fig.add_bar(name=name, x=[term(u, lang) for u in s.index], y=s.values, marker_color=GROUP_COLORS[g],
                         hovertemplate="%{x}<br>" + name + ": %{y:,.2f}<extra></extra>")
+    if bands:
+        tot = d.groupby("use").value.sum().reindex(order).fillna(0)
+        _err_trace(fig, [term(u, lang) for u in order], tot.values, [bands.get(u, (v, v)) for u, v in tot.items()], lang)
     fig.update_layout(barmode="stack", yaxis_title=t("unit_axis", lang), bargap=0.35)
     return _layout(fig, lang, 430, t("ch_bar", lang))
 
 
-def consumption_donut(by_use, uses_order, lang="fa"):
+def consumption_donut(by_use, uses_order, lang="fa", band=None):
     s = pd.Series(by_use, dtype=float)
     s = s[s > 1e-6]
     if s.empty:
@@ -85,28 +106,38 @@ def consumption_donut(by_use, uses_order, lang="fa"):
                            marker=dict(colors=[col.get(u, "#94a3b8") for u in s.index], line=dict(color="white", width=2)),
                            textinfo="percent",
                            hovertemplate="%{label}<br>%{value:,.2f} " + t("unit_short", lang) + "<extra></extra>"))
-    fig.add_annotation(text=f"<b>{s.sum():,.1f}</b><br>{t('ch_donut_center', lang)}", showarrow=False,
+    rng = (f"<br><span style='font-size:11px;color:#64748b'>({band[0]:,.0f} – {band[1]:,.0f})</span>"
+           if band else "")
+    fig.add_annotation(text=f"<b>{s.sum():,.1f}</b><br>{t('ch_donut_center', lang)}{rng}", showarrow=False,
                        font=dict(size=15))
     return _layout(fig, lang, 430, t("ch_donut", lang))
 
 
-def trend_withdrawals(by_year_use, uses_order, lang="fa"):
+def trend_withdrawals(by_year_use, uses_order, lang="fa", bands=None):
     fig = go.Figure()
     col = use_colors(uses_order)
     for u in uses_order:
         if u in by_year_use.columns and by_year_use[u].sum() > 0:
             fig.add_bar(name=term(u, lang), x=by_year_use.index, y=by_year_use[u], marker_color=col[u])
+    if bands is not None and len(bands):
+        tot = by_year_use.sum(axis=1)
+        _err_trace(fig, list(tot.index), tot.values,
+                   [(bands.loc[y, "withdrawal_lo"], bands.loc[y, "withdrawal_hi"]) if y in bands.index else (v, v)
+                    for y, v in tot.items()], lang)
     fig.update_layout(barmode="stack", yaxis_title=t("unit_axis", lang), xaxis_type="category", bargap=0.3)
     return _layout(fig, lang, 430, t("ch_trend_w", lang))
 
 
-def trend_balance(tot, lang="fa"):
+def trend_balance(tot, lang="fa", bands=None):
     fig = go.Figure()
     spec = [("resources", t("ch_res_line", lang), "#1d4ed8", "solid"),
             ("withdrawal", t("withdrawal_s", lang), "#b45309", "solid"),
             ("consumption", t("consumption", lang), "#dc2626", "solid"),
             ("balance", t("balance", lang), "#059669", "dot")]
     for k, name, c, dash in spec:
+        if bands is not None and f"{k}_lo" in bands:
+            b = bands.reindex(tot.index)
+            _band_fill(fig, tot.index, b[f"{k}_lo"], b[f"{k}_hi"], c, name)
         fig.add_scatter(x=tot.index, y=tot[k], name=name, mode="lines+markers",
                         line=dict(color=c, dash=dash, width=3), marker=dict(size=8))
     fig.add_hline(y=0, line_color="#94a3b8", line_width=1)
@@ -114,13 +145,18 @@ def trend_balance(tot, lang="fa"):
     return _layout(fig, lang, 430, t("ch_trend_b", lang))
 
 
-def trend_indicators(ind, lang="fa"):
+def trend_indicators(ind, lang="fa", sd=None):
     fig = go.Figure()
     spec = [("renew_surface", t("renew_surface", lang), "#0ea5e9"),
             ("renew_ground", t("renew_ground", lang), "#b45309"),
             ("nonrenewable", t("nonrenew", lang), "#dc2626")]
+    sd_key = {"renew_surface": "renew_surface", "renew_ground": "renew_ground", "nonrenewable": "storage_change"}
     for k, name, c in spec:
-        fig.add_bar(x=ind.year, y=ind[k], name=name, marker_color=c)
+        err = None
+        if sd:  # 90% range of a normal error = +-1.645 sigma
+            err = dict(type="data", array=(ind[k].abs() * 1.645 * sd.get(sd_key[k], 0) / 100).fillna(0),
+                       color="#334155", thickness=1.3, width=4)
+        fig.add_bar(x=ind.year, y=ind[k], name=name, marker_color=c, error_y=err)
     fig.update_layout(barmode="group", yaxis_title=t("unit_axis", lang), xaxis_type="category", bargap=0.25)
     return _layout(fig, lang, 410, t("ch_trend_i", lang))
 
@@ -137,6 +173,37 @@ def heatmap(mat, title, lang="fa", fmt=",.2f", scale="Blues"):
     fig = _layout(fig, lang, 170 + 52 * len(mat), title)
     fig.update_layout(margin=dict(t=60, b=40))
     return fig
+
+
+# ----------------------------------------------------------------------------- scenarios
+def scenario_uses(base_by_use, scen_by_use, uses_order, lang="fa", bands=None):
+    order = [u for u in uses_order if base_by_use.get(u, 0) or scen_by_use.get(u, 0)]
+    x = [term(u, lang) for u in order]
+    hi = [max(bands[u][1] - scen_by_use.get(u, 0), 0) if bands and u in bands else 0 for u in order]
+    lo = [max(scen_by_use.get(u, 0) - bands[u][0], 0) if bands and u in bands else 0 for u in order]
+    fig = go.Figure()
+    fig.add_bar(x=x, y=[base_by_use.get(u, 0) for u in order], name=t("base", lang), marker_color="#94a3b8")
+    fig.add_bar(x=x, y=[scen_by_use.get(u, 0) for u in order], name=t("scen", lang), marker_color="#0e7490",
+                error_y=dict(type="data", array=hi, arrayminus=lo, color="#0f172a", thickness=1.5, width=5)
+                if bands else None)
+    fig.update_layout(barmode="group", yaxis_title=t("unit_axis", lang), bargap=0.3)
+    return _layout(fig, lang, 400, t("ch_scen_use", lang))
+
+
+def scenario_trend(df, lang="fa"):
+    """df index = year; columns deficit_b, deficit_s, balance_b, balance_s (+ *_s_lo / *_s_hi bands)."""
+    fig = go.Figure()
+    spec = [("deficit", t("deficit", lang), "#dc2626"), ("balance", t("balance", lang), "#059669")]
+    for k, name, c in spec:
+        if f"{k}_s_lo" in df:
+            _band_fill(fig, df.index, df[f"{k}_s_lo"], df[f"{k}_s_hi"], c, name)
+        fig.add_scatter(x=df.index, y=df[f"{k}_b"], name=f"{name} — {t('base', lang)}", mode="lines+markers",
+                        line=dict(color=c, width=2, dash="dot"), marker=dict(size=6))
+        fig.add_scatter(x=df.index, y=df[f"{k}_s"], name=f"{name} — {t('scen', lang)}", mode="lines+markers",
+                        line=dict(color=c, width=3), marker=dict(size=8))
+    fig.add_hline(y=0, line_color="#94a3b8", line_width=1)
+    fig.update_layout(yaxis_title=t("unit_axis", lang), xaxis_type="category")
+    return _layout(fig, lang, 400, t("ch_scen_trend", lang))
 
 
 # ----------------------------------------------------------------------------- map

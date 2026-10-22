@@ -15,11 +15,11 @@ import pandas as pd
 
 sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, str(Path(__file__).parent))
-from wa import charts  # noqa: E402
+from wa import charts, scenario, uncertainty  # noqa: E402
 from wa.build import get_base  # noqa: E402
 from wa.config import GROUP_ORDER, list_configs, load_config  # noqa: E402
 from wa.engine import compute  # noqa: E402
-from wa.table import LAYOUTS, build_table, to_excel_bytes, to_html  # noqa: E402
+from wa.table import LAYOUTS, build_table, filt, to_excel_bytes, to_html  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument("configs", nargs="*")
@@ -60,6 +60,13 @@ for path in paths:
                     for lg in ("fa", "en"):
                         charts.basin_map(base["shapes"], meta["sub_basins"], counties, wy, base["dams"],
                                          [u["name"] for u in uses], cfg["spatial"]["sub_basin_label"], "osm", lg, mm)
+                # uncertainty bands for this year
+                Wf, res = uncertainty.selection_inputs(W, RES, filt, y, meta["sub_basins"], counties,
+                                                       [u["name"] for u in uses], GROUP_ORDER, lambda d: d,
+                                                       cfg["balance_source_groups"])
+                b = uncertainty.bands(uncertainty.simulate(Wf, {u["name"]: u["return_coef"] for u in uses}, res,
+                                                           None, cfg["uncertainty"]))
+                assert b["withdrawal"][0] <= b["withdrawal"][1]
                 # every sub-basin and county alone
                 for sb in meta["sub_basins"]:
                     build_table(base, cfg, uses, W, RET, RES, y, [sb], counties, [u["name"] for u in uses],
@@ -68,6 +75,16 @@ for path in paths:
                     build_table(base, cfg, uses, W, RET, RES, y, meta["sub_basins"], [c], [u["name"] for u in uses],
                                 "sub_basin", GROUP_ORDER, False)
         print(pd.DataFrame(rows).to_string(index=False))
+        # a management scenario using every lever
+        agri = next((u["name"] for u in uses if "کشاورزی" in u["name"]), None)
+        scen = {"use_pct": {agri: -20} if agri else {}, "gw_pct": -5, "illegal_close": 50, "reuse_pct": 50,
+                "transfer_delta": 10, "climate_pct": -20, "scope": "all"}
+        sb_ = scenario.apply(base, cfg, uses, modes[0], scen)
+        Ws, RETs, RESs = compute(sb_, cfg, uses, modes[0])
+        cs = sorted(set(Ws.county.dropna()) | set(RESs.county.dropna()))
+        _, ts = build_table(sb_, cfg, uses, Ws, RETs, RESs, meta["years"][-1], meta["sub_basins"] + ["نامشخص"], cs,
+                            [u["name"] for u in uses], "excel", GROUP_ORDER, True)
+        print(f"   scenario ({meta['years'][-1]}): withdrawal {ts['withdrawal']:.1f}, balance {ts['balance']:.1f}")
         print("   OK")
     except Exception:  # noqa: BLE001
         failed = True
