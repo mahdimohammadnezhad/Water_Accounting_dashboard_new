@@ -32,12 +32,21 @@ def _files(folder, exts):
     return sorted(out)
 
 
-def _well_score(path):
-    """How well the first sheet's header matches the well-statistics columns."""
+def _head(path):
     try:
-        head = pd.read_excel(path, nrows=3)
+        return pd.read_excel(path, nrows=3)
     except Exception:  # noqa: BLE001
-        return 0, {}
+        return None
+
+
+def _is_census(head):
+    """Statistical Centre census file (household / population by village)."""
+    cols = {str(c).strip().lower() for c in head.columns}
+    return "code of record" in cols and "population" in cols
+
+
+def _well_score(head):
+    """How well the first sheet's header matches the well-statistics columns."""
     score, cols = 0, {}
     for key, aliases in WELL_COLUMN_ALIASES.items():
         c = match_column(head.columns, aliases)
@@ -67,18 +76,22 @@ def _hint(path, hints):
 
 def _excel_roles(folder):
     xls = _files(folder, {".xls", ".xlsx", ".xlsm"})
-    wells, dams = None, None
+    wells, dams, census = None, None, []
+    heads = {p: _head(p) for p in xls}
+    census = [p for p, h in heads.items() if h is not None and _is_census(h)]
     for p in xls:
+        if p in census:
+            continue
         n = _is_dam_file(p)
         if n and (dams is None or n > dams[1]):
             dams = (p, n)
     for p in xls:
-        if dams and p == dams[0]:
+        if (dams and p == dams[0]) or p in census or heads[p] is None:
             continue
-        s, cols = _well_score(p)
+        s, cols = _well_score(heads[p])
         if s >= 50 and (wells is None or s > wells[1]):
             wells = (p, s, cols)
-    return wells, dams
+    return wells, dams, census
 
 
 def _study_area_from_wells(sa_all, ct_all, wells):
@@ -116,7 +129,7 @@ def scan(folder, name=None, key=None, log=print):
     if not folder.exists():
         raise FileNotFoundError(folder)
     rel = lambda p: p.relative_to(folder).as_posix()  # noqa: E731
-    wells, dams = _excel_roles(folder)
+    wells, dams, census_files = _excel_roles(folder)
 
     # ---- country-wide layers (configs/_regional.yaml): never taken as this basin's own layers
     reg = regional_spec({"basin": {"base_dir": str(folder)}})
@@ -249,6 +262,19 @@ def scan(folder, name=None, key=None, log=print):
     names = sorted(dict.fromkeys(names), key=lambda n: order.index(n) if n in order else 99)
     cfg["uses"] = [{k: v for k, v in default_use(n).items() if k in ("name", "return_coef", "river_fraction",
                                                                       "return_group")} for n in names]
+
+    # ---- population census (Statistical Centre household / population file, e.g. CN95_..._09.xlsx)
+    if census_files:
+        from .census import census_year_from_name
+        files = [rel(f) for f in census_files]
+        cfg["demand"] = {"census": {("file" if len(files) == 1 else "files"): files[0] if len(files) == 1 else files,
+                                    "year": census_year_from_name(census_files[0].name)},
+                         "growth": [{"from": census_year_from_name(census_files[0].name), "rate": 1.3}],
+                         "growth_band": 0.5}
+        log(f"census: {files}")
+    else:
+        notes.append("فایل سرشماری جمعیت پیدا نشد؛ نیاز شرب با شاخص نسبی جمعیت رشد می‌کند / no population census "
+                     "file found: drinking demand grows on a relative population index")
     return cfg, notes
 
 

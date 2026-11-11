@@ -15,7 +15,7 @@ import pandas as pd
 
 sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, str(Path(__file__).parent))
-from wa import charts, scenario, uncertainty  # noqa: E402
+from wa import charts, demand, scenario, uncertainty  # noqa: E402
 from wa.build import get_base  # noqa: E402
 from wa.config import GROUP_ORDER, list_configs, load_config  # noqa: E402
 from wa.engine import compute  # noqa: E402
@@ -85,6 +85,29 @@ for path in paths:
         _, ts = build_table(sb_, cfg, uses, Ws, RETs, RESs, meta["years"][-1], meta["sub_basins"] + ["نامشخص"], cs,
                             [u["name"] for u in uses], "excel", GROUP_ORDER, True)
         print(f"   scenario ({meta['years'][-1]}): withdrawal {ts['withdrawal']:.1f}, balance {ts['balance']:.1f}")
+        # population (census, if configured) and the demand projection with a two-period growth table
+        W, RET, RES = compute(base, cfg, uses, modes[0])
+        hist = W.pivot_table(index="year", columns="use", values="value", aggfunc="sum").reindex(meta["years"]).fillna(0)
+        ind = base["indicators"]
+        renew = ind.set_index("year").renew_total.astype(float).dropna() if len(ind) else pd.Series(dtype=float)
+        cen, cinfo = base.get("census"), meta.get("census")
+        pop0 = float((cen.urban * cen.urban_pct / 100 + cen.rural * cen.rural_pct / 100).sum()) \
+            if cinfo and cen is not None and len(cen) else None
+        y0 = demand.year_start(meta["years"][-1])
+        p = {**demand.DEFAULTS, "growth": [(y0 - 5, 1.3), (y0 + 8, 0.9)]}
+        dfp, summ = demand.project(hist, {u["name"]: u["return_coef"] for u in uses}, renew, 15, p, pop0,
+                                   cinfo["year"] if cinfo else None)
+        assert summ["pop_end_lo"] <= summ["pop_end"] <= summ["pop_end_hi"]
+        for lg in ("fa", "en"):
+            charts.demand_chart(dfp, summ, lg)
+            if summ["pop_absolute"]:
+                charts.population_chart(dfp, summ, lg)
+        if summ["pop_absolute"]:
+            print(f"   population: census {cinfo['year']} {summ['pop_census']:,.0f}, base year {summ['pop_base']:,.0f}, "
+                  f"horizon {summ['pop_end']:,.0f} ({summ['pop_end_lo']:,.0f} – {summ['pop_end_hi']:,.0f}); "
+                  f"per capita {summ.get('percap', float('nan')):,.0f} l/person/day")
+        else:
+            print("   population: no census configured (relative index)")
         print("   OK")
     except Exception:  # noqa: BLE001
         failed = True

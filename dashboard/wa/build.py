@@ -12,11 +12,11 @@ import geopandas as gpd
 import pandas as pd
 from pyproj import Transformer
 
-from . import loaders, spatial
-from .config import clear_excel_cache, processed_dir, regional_spec, resolve_uses, signature, to_json
+from . import census, loaders, spatial
+from .config import clear_excel_cache, processed_dir, regional_spec, resolve, resolve_uses, signature, to_json
 from .text import natural_key
 
-TABLES = ["W", "RES", "indicators", "cells", "wells", "dams", "dam_stats", "simaye"]
+TABLES = ["W", "RES", "indicators", "cells", "wells", "dams", "dam_stats", "simaye", "census"]
 WELL_COLS = ["year", "x", "y", "use", "county_attr", "county_geo", "sub_basin", "sb_method", "cls", "value"]
 DAM_META_COLS = ["dam", "sub_basin", "location_county", "county", "x", "y"]
 
@@ -113,6 +113,22 @@ def build(cfg, log=print):
         loaders.warn(report, "هیچ برداشتی خوانده نشد؛ مسیر فایل‌های چاه و سد را در پیکربندی بررسی کنید.",
                      "No withdrawals were read; check the well and dam file paths in the config.")
 
+    # population census: counties of the basin with the default share of their population inside it
+    census_tbl, census_info = pd.DataFrame(columns=census.COUNTY_COLS), None
+    if (cfg.get("demand") or {}).get("census"):
+        log("census ...")
+        polys = regional["counties"].to_crs(sb.crs) if "counties" in regional else ct
+        data_cts = W.groupby("county_attr").value.sum().to_dict() if len(W) else {}
+        names = _step(report, "نام شهرستان‌های لایه سراسری", "country-wide county names",
+                      lambda: spatial.regional_county_names(reg_spec), set) if "counties" in regional else set()
+        got = _step(report, "سرشماری جمعیت", "population census",
+                    lambda: census.load(cfg, polys, sb.union_all(), data_cts, resolve, names), lambda: None)
+        if got is not None:
+            census_tbl, census_info = got
+            if census_tbl.empty:
+                loaders.warn(report, "در فایل سرشماری هیچ شهرستانی از این محدوده پیدا نشد.",
+                             "No county of this basin was found in the census file.")
+
     # geographic coordinates for the web map
     to_ll = Transformer.from_crs(cfg["basin"]["crs"], "EPSG:4326", always_xy=True)
     for df in (wells, dams):
@@ -132,7 +148,7 @@ def build(cfg, log=print):
     out = processed_dir(cfg)
     out.mkdir(parents=True, exist_ok=True)
     tables = {"W": W, "RES": RES, "indicators": indicators, "cells": cells, "wells": wells, "dams": dams,
-              "dam_stats": dam_stats, "simaye": simaye}
+              "dam_stats": dam_stats, "simaye": simaye, "census": census_tbl}
     for k, df in tables.items():
         df.reset_index(drop=True).to_parquet(out / f"{k}.parquet", index=False)
     shapes = {"sub_basins": spatial.to_plot_shapes(sb.to_crs(4326), "sub_basin", tolerance=0.0015),
@@ -155,7 +171,7 @@ def build(cfg, log=print):
             "uses": resolve_uses(cfg, list(use_totals.index)),
             "has_county_attr": bool(len(wells)) and bool((wells.county_attr != spatial.UNKNOWN).any()),
             "has_county_geo": ct is not None and not ct.empty,
-            "report": report}
+            "census": census_info, "report": report}
     (out / "meta.json").write_text(to_json(meta), encoding="utf-8")
     log(f"done in {meta['seconds']} s")
     return load_processed(cfg)
@@ -163,7 +179,8 @@ def build(cfg, log=print):
 
 def load_processed(cfg):
     out = processed_dir(cfg)
-    base = {k: pd.read_parquet(out / f"{k}.parquet") for k in TABLES}
+    base = {k: pd.read_parquet(out / f"{k}.parquet") if (out / f"{k}.parquet").exists() else pd.DataFrame()
+            for k in TABLES}
     base["shapes"] = json.loads((out / "shapes.json").read_text(encoding="utf-8"))
     base["meta"] = json.loads((out / "meta.json").read_text(encoding="utf-8"))
     for k in ("W", "RES", "cells", "wells", "dams"):

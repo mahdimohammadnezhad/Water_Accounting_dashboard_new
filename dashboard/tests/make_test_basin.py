@@ -61,6 +61,10 @@ with pd.ExcelWriter(OUT / "stats" / "dam_statistics.xlsx") as xw:
 pd.DataFrame({"a": [1, 2], "b": [3, 4]}).to_excel(OUT / "stats" / "notes.xlsx", index=False)
 for f in ["simabm_mashhad_99_00.pdf", "simabm_mashhad_00_01.pdf", "BILAN402-03.pdf"]:
     shutil.copy(SRC / "Bilan" / f, OUT / "simaye ab" / f)
+# population census (only in scenario A; scenario B tests the no-census path)
+if (SRC / "CN95_HouseholdPopulationVillage_09.xlsx").exists():
+    (OUT / "population").mkdir()
+    shutil.copy(SRC / "CN95_HouseholdPopulationVillage_09.xlsx", OUT / "population" / "CN95_test_province.xlsx")
 print("synthetic basin written to", OUT)
 for f in (DASH / "configs").glob("test_basin*.yaml"):  # leftovers of a previous --keep run
     f.unlink()

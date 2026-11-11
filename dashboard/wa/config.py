@@ -204,6 +204,10 @@ def input_files(cfg):
             files.append(t["table"]["file"])
     for s in cfg.get("special_withdrawals") or []:
         files.append(s["table"]["file"])
+    cen = (cfg.get("demand") or {}).get("census") or {}
+    cen_files = cen.get("files") or cen.get("file")
+    if cen_files:
+        files += cen_files if isinstance(cen_files, list) else [cen_files]
     ind = cfg.get("indicators") or {}
     if isinstance(ind, dict):
         files += [t["file"] for t in ind.values()]
@@ -229,7 +233,7 @@ def signature(cfg):
     """Hash of config contents + build code + input file mtimes/sizes."""
     h = hashlib.sha1()
     h.update(Path(cfg["_path"]).read_bytes())
-    for mod in ("loaders.py", "spatial.py", "build.py", "text.py", "simaye_ab.py", "config.py"):
+    for mod in ("loaders.py", "spatial.py", "build.py", "text.py", "simaye_ab.py", "config.py", "census.py"):
         h.update((Path(__file__).parent / mod).read_bytes())
     for p in input_files(cfg):
         st = os.stat(p) if p.exists() else None

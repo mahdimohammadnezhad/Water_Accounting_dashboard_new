@@ -11,6 +11,7 @@ and source type. The interface is available in **Persian (default) and English**
 | Dam statistics (start-of-year storage, inflow, uses, location) — one sheet per water year | `Amar_SAD.xlsx` | `wa/loaders.py` → `load_dams` |
 | Renewable surface / groundwater, aquifer storage change, inter-basin transfer | *Simaye Ab* PDFs (`Bilan/`) | `wa/simaye_ab.py` |
 | Sub-basins, counties, dam points | shapefiles (`shape/`) | `wa/spatial.py` |
+| Population census (household & population by village, whole province; optional) | `CN95_HouseholdPopulationVillage_09.xlsx` | `wa/census.py` |
 | All study areas and all counties of Iran (map context, look-up by name) | `shape/Basins/Mahdoude.shp`, `shape/shahrestan/shrestan.shp` | `configs/_regional.yaml` → `wa/spatial.py` → `read_regional` |
 
 ### Country-wide layers
@@ -60,8 +61,61 @@ county, all uses by sub-basin, or by use only. Return-flow coefficients can be e
 - **Return flow**: return = coefficient × withdrawal of the group. The `river_fraction` share goes to a river
   reach (for Mashhad urban drinking: reach 4), the rest to the aquifers in proportion to groundwater withdrawal.
   Half of Mashhad's urban drinking return is reported as treatment-plant output.
-- **Consumption (C)** = withdrawal − return; **balance check (B)** = available volume of dams, groundwater and
-  transfers − consumption.
+- **Consumption (C)** = withdrawal − return; **balance check (B)** = renewable water − consumption (see below).
+
+## Balance check and the Simaye Ab water budget
+- **Balance check (B)** = renewable water of the selected area (Simaye Ab, scaled by area) − consumption. A negative
+  value means consumption exceeds the renewable water, i.e. it is drawn from storage. The sidebar can switch back
+  to the Excel definition (available volume of dams, groundwater and transfers − consumption).
+- The **water budget** panel at the top reads every row of the first Simaye Ab table (rainfall, evapotranspiration,
+  renewable surface/groundwater, surface & transfer and groundwater inflows/outflows, aquifer and reservoir
+  storage change, reservoir evaporation) and draws inputs against outputs:
+  renewable + inflows + storage loss = net consumption + outflows (+ storage gain). The dashboard's own consumption
+  is marked on the outputs bar so the two can be compared.
+
+## Trends and future demand
+- *Annual trend* tab: withdrawal by use; **dependence of uses on sources** (for each year, how much groundwater,
+  dam water, transfer and effluent goes to each use, absolute or %); **renewable water, consumption and balance**
+  with uncertainty bands and any number of "x % of renewable water" lines, each with its uncertainty cloud.
+- *Water demand & future* tab: observed consumption, the past demand estimated from population, and projections to
+  a chosen horizon under three scenarios — *supply drinking & industry* (population and industry growth, band =
+  growth rate ± its uncertainty), *rebalancing* (agriculture reduced until consumption reaches a target % of the
+  mean renewable water by a target year, not below a floor; reports whether the target is reached) and *review of
+  executed measures* (the linear trend of past consumption continued, with its prediction band) — against the
+  renewable water with its band. Per-capita change, industry growth, target and floor are editable (defaults are
+  starting assumptions; a basin config can set them under `demand:`).
+
+## Population
+- **Census.** The Statistical Centre file (household & population by village, `code of record` hierarchy:
+  1 province, 2 county, 5 city with its urban zones, 6/8 village) is read by `wa/census.py`. Urban population of a
+  county = county total − its villages; zone records of large cities (e.g. «مشهد1»…«مشهد 12») are not counted twice.
+- **Population of the study area** = Σ over counties (urban × urban share + rural × rural share). Defaults:
+  rural share = share of the county's area inside the study area (country-wide county layer); urban share = 100 %
+  if at least half of the county lies inside, else 0. A county missing from the county layer but holding at least
+  1 % of the withdrawal (Binalud = Torqabeh-Shandiz) counts fully. Both shares are editable in the dashboard
+  (table *County population in the census*) and can be fixed in the config (`demand.census.shares`). For Mashhad
+  the 1395 census gives about **3.45 million** people inside the study area.
+- **Growth rate.** An editable table of periods, *from year → rate (%/yr)*: each row applies from its year until
+  the next row; the first row also covers the years between the census and the base year (and back-casting). The
+  future band uses rate ± the given uncertainty (percentage points). Population, its band and the per-capita
+  withdrawal of drinking & services (l/person/day) are shown on a chart; drinking and services demand grows in
+  proportion to the population.
+- **Selection.** County filters use the census counties of the selected counties; a partial sub-basin selection
+  scales the population by those sub-basins' share of drinking & services withdrawal.
+- Without a census file the growth table acts on a relative population index (base year = 100).
+
+```yaml
+demand:
+  census:
+    file: CN95_HouseholdPopulationVillage_09.xlsx   # or files: [...] for a basin spanning several provinces
+    year: 1395                                       # default: from the file name (CN95 -> 1395)
+    county_aliases: {بینالود: طرقبه-شاندیز}           # census name -> name in the well statistics
+    shares: {قوچان: {urban: 0, rural: 31}}           # optional: % of the county's urban / rural population inside
+  growth:                                            # annual population growth (%), each from its year on
+    - {from: 1395, rate: 1.3}
+    - {from: 1403, rate: 1.3}
+  growth_band: 0.5                                   # ± percentage points for the future band
+```
 
 ## Uncertainty bands
 Every input gets an assumed relative error (1σ, editable in the sidebar or per basin under `uncertainty:`):
@@ -84,7 +138,8 @@ names, sheet names, coordinate systems, numbers of sub-basins, etc.).
 
 1. Put the basin's files in one folder (sub-folders are fine): the well Excel, the dam Excel (one sheet per
    water year, e.g. `94-95` or `1394-95`), the Simaye Ab PDFs, and — optionally — the sub-basin, county and
-   dam-point shapefiles (without them the country-wide layers are used, see above).
+   dam-point shapefiles (without them the country-wide layers are used, see above) and the province census file
+   (recognised by its `code of record` / `population` columns).
 2. In the sidebar open **Add a new basin**, enter the folder path and a name, and click *Scan folder & create
    config* — or run `..\.venv\Scripts\python.exe new_basin.py "<folder>" --name "<name>"`.
 3. The files, fields and coordinate system are detected automatically and `configs/<key>.yaml` is written,
@@ -124,6 +179,8 @@ dashboard/
   wa/table.py            sources-and-uses table, conditional formatting, Excel export
   wa/uncertainty.py      Monte Carlo uncertainty bands
   wa/scenario.py         management scenarios
+  wa/demand.py           population series and water-demand projections
+  wa/census.py           population census reader, county shares inside the basin
   wa/charts.py, wa/ui.py charts, map, layout
   wa/i18n.py             Persian / English texts and vocabulary
   static/fonts/          Vazirmatn font (served locally, no internet needed)

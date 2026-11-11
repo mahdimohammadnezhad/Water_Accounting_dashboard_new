@@ -175,6 +175,208 @@ def heatmap(mat, title, lang="fa", fmt=",.2f", scale="Blues"):
     return fig
 
 
+# ----------------------------------------------------------------------------- Simaye Ab water budget
+BUDGET_COLORS = {"renew_surface": "#0ea5e9", "renew_ground": "#b45309", "inflow": "#14b8a6", "gw_in": "#a16207",
+                 "storage_loss": "#dc2626", "consumption": "#7c3aed", "outflow": "#0891b2", "gw_out": "#92400e",
+                 "reservoir_evap": "#94a3b8", "storage_gain": "#16a34a"}
+
+
+def budget_terms(row):
+    """Inputs / outputs of the study area from one (area-scaled) Simaye Ab row. Net consumption closes the budget:
+    renewable + inflows + storage loss = net consumption + outflows (+ storage gain)."""
+    g = lambda k: float(row.get(k)) if row.get(k) is not None and pd.notna(row.get(k)) else 0.0  # noqa: E731
+    ds = -g("nonrenewable") + g("delta_s_surface")  # total storage change (aquifer + reservoirs)
+    ins = {"renew_surface": g("renew_surface"), "renew_ground": g("renew_ground"), "inflow": g("inflow"),
+           "gw_in": g("gw_in"), "storage_loss": max(-ds, 0.0)}
+    outs = {"outflow": g("outflow"), "gw_out": g("gw_out"), "reservoir_evap": g("reservoir_evap"),
+            "storage_gain": max(ds, 0.0)}
+    outs = {"consumption": sum(ins.values()) - sum(outs.values()), **outs}
+    return ins, outs
+
+
+def water_budget(row, dash_consumption, lang="fa"):
+    ins, outs = budget_terms(row)
+    tot = sum(ins.values())
+    fig = go.Figure()
+    for side, terms in ((t("bud_in", lang), ins), (t("bud_out", lang), outs)):
+        for k, v in terms.items():
+            if v <= 1e-6:
+                continue
+            fig.add_bar(y=[side], x=[v], orientation="h", name=t(f"bud_{k}", lang), marker_color=BUDGET_COLORS[k],
+                        text=[f"{t(f'bud_{k}', lang)}<br><b>{v:,.0f}</b>" if v > 0.16 * tot else f"<b>{v:,.0f}</b>"],
+                        textposition="inside", insidetextanchor="middle", textfont=dict(color="white", size=12),
+                        hovertemplate=f"{t(f'bud_{k}', lang)}: %{{x:,.1f}} {t('unit_short', lang)}<extra></extra>",
+                        legendgroup=k, showlegend=False)
+    if dash_consumption is not None:
+        fig.add_scatter(x=[dash_consumption], y=[t("bud_out", lang)], mode="markers",
+                        marker=dict(symbol="line-ns", size=46, line=dict(width=3, color="#111827")),
+                        name=t("bud_dash", lang), hovertemplate=f"{t('bud_dash', lang)}: %{{x:,.1f}}<extra></extra>")
+    fig.add_vline(x=tot, line_dash="dot", line_color="#334155", line_width=1.5)
+    fig.update_layout(barmode="stack", bargap=0.28, showlegend=dash_consumption is not None,
+                      uniformtext=dict(minsize=10, mode="hide"))
+    fig.update_xaxes(title=t("unit_axis", lang), autorange="reversed" if lang == "fa" else True)
+    fig = _layout(fig, lang, 260, t("bud_title", lang))
+    fig.update_layout(margin=dict(l=10, r=10, t=46, b=30), legend=dict(y=-0.32))
+    return fig
+
+
+# ----------------------------------------------------------------------------- dependency of uses on sources
+DEP_GROUPS = {"dam": "dam", "river": "dam", "transfer": "transfer", "gw": "gw", "treatment": "treatment"}
+
+
+def source_use_dependency(Wall, years, uses_order, lang="fa", pct=False):
+    """x = (year, source) grouped bars, stacked by use: how much of each source goes to each use, every year."""
+    d = Wall.assign(src=Wall.source_group.map(DEP_GROUPS)).groupby(["year", "src", "use"]).value.sum()
+    srcs = [g for g in ("gw", "dam", "transfer", "treatment") if g in set(d.index.get_level_values(1))]
+    xs = [(y, g) for y in years for g in srcs]
+    col = use_colors(uses_order)
+    fig = go.Figure()
+    tot = d.groupby(level=[0, 1]).sum()
+    for u in uses_order:
+        vals = [float(d.get((y, g, u), 0.0)) for y, g in xs]
+        if pct:
+            vals = [100 * v / tot.get((y, g), 0) if tot.get((y, g), 0) else 0 for v, (y, g) in zip(vals, xs)]
+        if not any(vals):
+            continue
+        fig.add_bar(x=[[y for y, _ in xs], [t(f"dep_{g}", lang) for _, g in xs]], y=vals, name=term(u, lang),
+                    marker_color=col[u],
+                    hovertemplate="%{x}<br>" + term(u, lang) + (": %{y:.0f}%" if pct else ": %{y:,.1f}") +
+                                  "<extra></extra>")
+    fig.update_layout(barmode="stack", bargap=0.18, yaxis_title="%" if pct else t("unit_axis", lang))
+    fig.update_xaxes(tickfont=dict(size=10), tickangle=-90)
+    fig = _layout(fig, lang, 520, t("ch_dep", lang))
+    fig.update_layout(legend=dict(y=-0.32), margin=dict(b=40))
+    return fig
+
+
+# ----------------------------------------------------------------------------- renewable vs. use trend
+PCT_COLORS = ["#1d4ed8", "#0891b2", "#7c3aed", "#0d9488", "#64748b", "#c026d3"]
+
+
+def trend_renewable(tot, bands, renew, pcts, lang="fa"):
+    """tot: yearly totals (consumption, withdrawal, balance); bands: *_lo/*_hi per year (or None);
+    renew: Series year -> renewable water (selection); pcts: percentages of renewable to draw (each with its band)."""
+    fig = go.Figure()
+    x = list(tot.index)
+    if len(renew):
+        r = renew.reindex(x)
+        has_b = bands is not None and "renew_total_lo" in bands
+        for i, pc in enumerate(sorted(pcts, reverse=True)):
+            c = PCT_COLORS[i % len(PCT_COLORS)]
+            name = t("pct_renew", lang, p=f"{pc:g}")
+            if has_b:
+                b = bands.reindex(x)
+                _band_fill(fig, x, b["renew_total_lo"] * pc / 100, b["renew_total_hi"] * pc / 100, c, name)
+            fig.add_scatter(x=x, y=r * pc / 100, name=name, mode="lines+markers",
+                            line=dict(color=c, width=3 if pc == 100 else 2, dash="solid" if pc == 100 else "dash"),
+                            marker=dict(size=7 if pc == 100 else 5))
+    spec = [("consumption", t("consumption", lang), "#dc2626", "solid", True),
+            ("withdrawal", t("withdrawal_s", lang), "#b45309", "solid", False),
+            ("balance", t("balance", lang), "#059669", "dot", True)]
+    for k, name, c, dash, band in spec:
+        if band and bands is not None and f"{k}_lo" in bands:
+            b = bands.reindex(x)
+            _band_fill(fig, x, b[f"{k}_lo"], b[f"{k}_hi"], c, name)
+        fig.add_scatter(x=x, y=tot[k], name=name, mode="lines+markers", line=dict(color=c, dash=dash, width=3),
+                        marker=dict(size=7))
+    fig.add_hline(y=0, line_color="#94a3b8", line_width=1)
+    fig.update_layout(yaxis_title=t("unit_axis", lang), xaxis_type="category")
+    return _layout(fig, lang, 470, t("ch_trend_r", lang))
+
+
+# ----------------------------------------------------------------------------- demand projection
+def demand_chart(df, summary, lang="fa", show_withdrawal=False):
+    fig = go.Figure()
+    x = list(df.index)
+    n_past = int(df["obs_consumption"].notna().sum()) if "obs_consumption" in df else 0
+    if n_past and n_past < len(x):
+        fig.add_vrect(x0=n_past - 0.5, x1=len(x) - 0.5, fillcolor="#f1f5f9", opacity=0.6, line_width=0, layer="below")
+        fig.add_annotation(x=n_past - 0.5, y=1, yref="paper", text=t("dm_future", lang), showarrow=False,
+                           xanchor="left", yanchor="top", font=dict(color="#64748b", size=12))
+    if "renew" in df:
+        _band_fill(fig, x, df["renew_lo"], df["renew_hi"], "#1d4ed8", "renew")
+        fig.add_scatter(x=x, y=df["renew"], name=t("dm_renew", lang), mode="lines",
+                        line=dict(color="#1d4ed8", width=3))
+        if "target" in df and abs(float(df["target"].iloc[-1]) - float(summary.get("renew_mean", 0))) > 1e-6:
+            fig.add_scatter(x=x, y=df["target"], name=t("dm_target", lang), mode="lines",
+                            line=dict(color="#1d4ed8", width=2, dash="dash"))
+    series = [("trend", "#7c3aed", "dm_s_trend", True), ("supply", "#ea580c", "dm_s_supply", True),
+              ("balance", "#059669", "dm_s_balance", False)]
+    for k, c, key, band in series:
+        if k not in df:
+            continue
+        if band and f"{k}_lo" in df:
+            _band_fill(fig, x, df[f"{k}_lo"], df[f"{k}_hi"], c, key)
+        fig.add_scatter(x=x, y=df[k], name=t(key, lang), mode="lines+markers", line=dict(color=c, width=3),
+                        marker=dict(size=6))
+    if "demand_est" in df:
+        fig.add_scatter(x=x, y=df["demand_est"], name=t("dm_est", lang), mode="lines",
+                        line=dict(color="#64748b", width=2, dash="dash"))
+    fig.add_scatter(x=x, y=df["obs_consumption"], name=t("dm_obs", lang), mode="lines+markers",
+                    line=dict(color="#111827", width=3), marker=dict(size=8))
+    if show_withdrawal:
+        fig.add_scatter(x=x, y=df["obs_withdrawal"], name=t("dm_obs_w", lang), mode="lines+markers",
+                        line=dict(color="#b45309", width=2), marker=dict(size=6))
+    fig.update_layout(yaxis_title=t("unit_axis", lang), xaxis_type="category")
+    fig.update_xaxes(tickangle=-60, tickfont=dict(size=10))
+    fig = _layout(fig, lang, 560, t("ch_demand", lang))
+    fig.update_layout(legend=dict(y=-0.22), margin=dict(b=30))
+    return fig
+
+
+def pop_scale(v, lang="fa"):
+    """(divisor, unit label) for showing a population of size v."""
+    return (1e6, t("dm_mpeople", lang)) if v >= 1e6 else (1e3, t("dm_kpeople", lang)) if v >= 1e4 else \
+        (1.0, t("dm_people", lang))
+
+
+def population_chart(df, summary, lang="fa"):
+    """Population of the selection: past estimate (census + growth rates), census point, projection with band,
+    and the per-capita withdrawal of drinking & services (observed years, right axis)."""
+    fig = go.Figure()
+    x = list(df.index)
+    div, unit = pop_scale(float(df["pop"].max()), lang)
+    n_past = int(df["obs_consumption"].notna().sum())
+    past, fut = x[:n_past], x[n_past - 1:]
+    if n_past < len(x):
+        fig.add_vrect(x0=n_past - 0.5, x1=len(x) - 0.5, fillcolor="#f1f5f9", opacity=0.6, line_width=0, layer="below")
+        fig.add_annotation(x=n_past - 0.5, y=1, yref="paper", text=t("dm_future", lang), showarrow=False,
+                           xanchor="left", yanchor="top", font=dict(color="#64748b", size=12))
+        f = df.loc[fut]
+        _band_fill(fig, fut, f["pop_lo"] / div, f["pop_hi"] / div, "#c026d3", "pop_band")
+        fig.add_scatter(x=fut, y=f["pop"] / div, name=t("pop_future", lang), mode="lines",
+                        line=dict(color="#c026d3", width=3, dash="dash"),
+                        customdata=np.stack([f["pop_lo"] / div, f["pop_hi"] / div], axis=1),
+                        hovertemplate="%{x}<br>%{y:,.3f} (%{customdata[0]:,.3f} – %{customdata[1]:,.3f})<extra></extra>")
+    p = df.loc[past]
+    fig.add_scatter(x=past, y=p["pop"] / div, name=t("pop_past", lang), mode="lines+markers",
+                    line=dict(color="#86198f", width=3), marker=dict(size=6), hovertemplate="%{x}<br>%{y:,.3f}<extra></extra>")
+    cy = summary.get("census_year")
+    if cy is not None:
+        lab = f"{cy}-{(cy + 1) % 100:02d}"
+        if lab in df.index:
+            fig.add_scatter(x=[lab], y=[summary["pop_census"] / div], name=t("pop_census", lang, y=cy),
+                            mode="markers", marker=dict(symbol="diamond", size=14, color="#f59e0b",
+                                                        line=dict(color="#78350f", width=1.5)),
+                            hovertemplate="%{x}<br>%{y:,.3f}<extra></extra>")
+    if "percap" in df and df["percap"].notna().any():
+        q = df["percap"].dropna()
+        fig.add_bar(x=list(q.index), y=q.values, name=t("pop_lcd", lang), yaxis="y2", marker_color="rgba(13,148,136,0.28)",
+                    marker_line=dict(color="#0d9488", width=1), hovertemplate="%{x}<br>%{y:,.0f}<extra></extra>")
+        fig.update_layout(yaxis2=dict(title=t("dm_lcd_unit", lang), overlaying="y", side="left" if lang == "fa" else "right",
+                                      showgrid=False, range=[0, float(q.max()) * 3]))
+        # population lines in the upper part, per-capita bars in the lower third
+        lo, hi = float(df["pop_lo"].min()) / div, float(df["pop_hi"].max()) / div
+        span = max(hi - lo, hi * 0.05)
+        fig.update_layout(yaxis_range=[max(lo - 0.75 * span, 0), hi + 0.05 * span])
+    fig.update_layout(yaxis=dict(title=unit, side="right" if lang == "fa" else "left"), xaxis_type="category",
+                      barmode="overlay")
+    fig.update_xaxes(tickangle=-60, tickfont=dict(size=10), categoryorder="array", categoryarray=x)
+    fig = _layout(fig, lang, 400, t("ch_pop", lang))
+    fig.update_layout(legend=dict(y=-0.28), margin=dict(b=30))
+    return fig
+
+
 # ----------------------------------------------------------------------------- scenarios
 def scenario_uses(base_by_use, scen_by_use, uses_order, lang="fa", bands=None):
     order = [u for u in uses_order if base_by_use.get(u, 0) or scen_by_use.get(u, 0)]

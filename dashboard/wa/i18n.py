@@ -231,6 +231,151 @@ UI = {
                   "groundwater pumping; scenario aquifer deficit = observed deficit + change in GW withdrawal − change "
                   "in return to the aquifers − change in recharge. Groundwater availability (G) changes only with "
                   "the climate lever."),
+    # balance definition
+    "bal_def": ("تعریف کنترل بیلان", "Balance check definition"),
+    "bal_renewable": ("آب تجدیدپذیر − مصرف", "Renewable water − consumption"),
+    "bal_resources": ("حجم در دسترس − مصرف (روش اکسل)", "Available volume − consumption (Excel method)"),
+    "note_balance_renew": ("آب تجدیدپذیر − مصرف", "renewable water − consumption"),
+    "bal_table_note": ("کنترل بیلان (B) = آب تجدیدپذیر محدوده (سیمای آب) − مصرف؛ عدد منفی یعنی مصرف بیش از آب "
+                       "تجدیدپذیر است و از ذخیره برداشت شده.",
+                       "Balance check (B) = renewable water of the area (Simaye Ab) − consumption; a negative value "
+                       "means consumption exceeds the renewable water and is drawn from storage."),
+    # Simaye Ab water budget
+    "bud_title": ("بیلان آب محدوده (سیمای آب): ورودی‌ها و خروجی‌ها", "Water budget of the area (Simaye Ab): inputs and outputs"),
+    "bud_in": ("ورودی", "Inputs"), "bud_out": ("خروجی", "Outputs"),
+    "bud_renew_surface": ("تجدیدپذیر سطحی", "Renewable surface"),
+    "bud_renew_ground": ("تجدیدپذیر زیرزمینی", "Renewable groundwater"),
+    "bud_inflow": ("ورودی سطحی و انتقالی", "Surface & transfer inflow"),
+    "bud_gw_in": ("ورودی زیرزمینی", "Groundwater inflow"),
+    "bud_storage_loss": ("کاهش ذخیره (کسری مخزن)", "Storage loss (deficit)"),
+    "bud_consumption": ("مصرف خالص", "Net consumption"),
+    "bud_outflow": ("خروجی سطحی و انتقالی", "Surface & transfer outflow"),
+    "bud_gw_out": ("خروجی زیرزمینی", "Groundwater outflow"),
+    "bud_reservoir_evap": ("تبخیر از مخزن سدها", "Reservoir evaporation"),
+    "bud_storage_gain": ("افزایش ذخیره", "Storage gain"),
+    "bud_dash": ("مصرف محاسبه‌شده داشبورد", "Consumption computed by the dashboard"),
+    "bud_rain": ("بارش {p} = تبخیر و تعرق {e} + آب تجدیدپذیر {r} (سطحی {s} + زیرزمینی {g})",
+                 "Rainfall {p} = evapotranspiration {e} + renewable water {r} (surface {s} + groundwater {g})"),
+    "bud_note": ("دو ستون برابرند: تجدیدپذیر + ورودی‌ها + کاهش ذخیره = مصرف خالص + خروجی‌ها. مصرف خالص سیمای آب {c} و "
+                 "مصرف محاسبه‌شده در داشبورد {d} است (اختلاف {x}).",
+                 "Both bars are equal: renewable + inflows + storage loss = net consumption + outflows. Simaye Ab net "
+                 "consumption is {c}; the dashboard computes {d} (difference {x})."),
+    # trend charts
+    "ch_dep": ("وابستگی کاربری‌ها به منابع: سهم هر منبع برای هر کاربری در هر سال",
+               "Dependence of uses on sources: what each source supplies to each use, every year"),
+    "dep_pct": ("نمایش به درصد", "Show as percentage"),
+    "dep_gw": ("زیرزمینی", "Groundwater"), "dep_dam": ("سطحی (سد)", "Surface (dams)"),
+    "dep_transfer": ("انتقالی", "Transfer"), "dep_treatment": ("پساب", "Effluent"),
+    "ch_trend_r": ("روند آب تجدیدپذیر، مصرف و کنترل بیلان (با باند عدم قطعیت)",
+                   "Renewable water, consumption and balance check (with uncertainty bands)"),
+    "pct_renew": ("{p}٪ آب تجدیدپذیر", "{p}% of renewable water"),
+    "pct_select": ("درصدهای آب تجدیدپذیر برای رسم (هر کدام با ابر عدم قطعیت)",
+                   "Percentages of renewable water to draw (each with its uncertainty cloud)"),
+    # demand
+    "tab_demand": ("🔮 نیاز آبی و آینده", "🔮 Water demand & future"),
+    "ch_demand": ("نیاز آبی و مصرف: گذشته و آینده در سناریوهای مختلف", "Water demand and use: past and future scenarios"),
+    "dm_future": ("  آینده ←", "  future →"),
+    "dm_renew": ("آب تجدیدپذیر (میانگین آینده)", "Renewable water (future = mean)"),
+    "dm_target": ("هدف تعادل‌بخشی", "Rebalancing target"),
+    "dm_s_supply": ("سناریو تأمین آب شرب و صنعت", "Scenario: supply drinking & industry"),
+    "dm_s_balance": ("سناریو تعادل‌بخشی", "Scenario: rebalancing"),
+    "dm_s_trend": ("سناریو بازنگری اقدامات اجرایی (ادامه روند گذشته)", "Scenario: review of executed measures (past trend)"),
+    "dm_est": ("نیاز برآوردی گذشته (از جمعیت)", "Estimated past demand (from population)"),
+    "dm_obs": ("مصرف مشاهده‌شده", "Observed consumption"),
+    "dm_obs_w": ("برداشت مشاهده‌شده", "Observed withdrawal"),
+    "dm_params": ("⚙️ فرض‌های سناریوهای آینده", "⚙️ Future scenario assumptions"),
+    "dm_horizon": ("افق (سال شروع آخرین سال آبی)", "Horizon (start of the last water year)"),
+    "dm_pop_sec": ("👥 جمعیت و نرخ رشد جمعیت", "👥 Population and population growth"),
+    "dm_growth": ("نرخ رشد سالانه جمعیت (٪) — هر ردیف از «سال» خود به بعد اعمال می‌شود",
+                  "Annual population growth rate (%) — each row applies from its year on"),
+    "dm_g_from": ("از سال", "From year"),
+    "dm_g_rate": ("نرخ رشد (٪ در سال)", "Growth rate (%/yr)"),
+    "dm_g_help": ("با «+» ردیف اضافه کنید تا برای دوره‌های مختلف آینده نرخ جدا تعریف شود (مثلاً از ۱۴۱۰ نرخ کمتر). "
+                  "ردیف اول برای سال‌های پیش از ردیف بعدی (از جمله فاصله سرشماری تا سال پایه) به کار می‌رود.",
+                  "Add rows with “+” to set a different rate for later periods (e.g. a lower rate from 1410). The first "
+                  "row also covers the years before the next row (including census → base year)."),
+    "dm_g_band": ("عدم قطعیت نرخ رشد آینده (± واحد درصد)", "Uncertainty of the future growth rate (± percentage points)"),
+    "dm_g_band_help": ("باند بالا و پایین جمعیت آینده با نرخ رشد ± این مقدار ساخته می‌شود.",
+                       "The upper / lower future population uses the growth rate ± this value."),
+    "dm_g_industry": ("رشد صنعت (٪ در سال)", "Industry growth (%/yr)"),
+    "dm_pop_cen": ("جمعیت سرشماری {y}", "Population, {y} census"),
+    "dm_pop_base": ("جمعیت سال پایه {y} (برآورد)", "Population, base year {y} (estimate)"),
+    "dm_pop_end": ("جمعیت افق {y}", "Population at the horizon {y}"),
+    "dm_pop_rel": ("شاخص جمعیت افق {y} (سال پایه = ۱۰۰)", "Population index at the horizon {y} (base year = 100)"),
+    "dm_lcd": ("سرانه برداشت شرب و خدمات {y}", "Per-capita drinking & services withdrawal {y}"),
+    "dm_lcd_unit": ("لیتر/نفر/روز", "l/person/day"),
+    "dm_people": ("نفر", "people"), "dm_kpeople": ("هزار نفر", "thousand people"),
+    "dm_mpeople": ("میلیون نفر", "million people"),
+    "dm_in_sel": ("داخل محدوده انتخاب‌شده", "inside the selected area"),
+    "dm_from_rates": ("سرشماری × نرخ رشد جدول", "census × growth-rate table"),
+    "dm_cen_box": ("👥 جمعیت شهرستان‌ها در سرشماری {y} و سهم داخل محدوده (قابل ویرایش)",
+                   "👥 County population in the {y} census and the share inside the area (editable)"),
+    "dm_cen_help": ("ستون‌های درصد را می‌توانید تغییر دهید. پیش‌فرض: روستایی = سهم مساحت شهرستان داخل محدوده؛ شهری = ۱۰۰٪ "
+                    "اگر دست‌کم نیمی از شهرستان داخل محدوده باشد وگرنه ۰. شهرستانی که در لایه مرز شهرستان‌ها نیست ولی "
+                    "بخش قابل‌توجهی از برداشت محدوده را دارد (مثل بینالود = طرقبه-شاندیز) کامل حساب می‌شود. "
+                    "شهرستان‌هایی که بعد از سرشماری جدا شده‌اند (مثل گلبهار) جزو شهرستان مادر (چناران) هستند.",
+                    "The percentage columns are editable. Defaults: rural = share of the county's area inside the "
+                    "area; urban = 100 % if at least half of the county lies inside, else 0. A county missing from "
+                    "the county-border layer but holding a notable part of the withdrawal (e.g. Binalud = "
+                    "Torqabeh-Shandiz) counts fully. Counties created after the census (e.g. Golbahar) are part "
+                    "of their parent county (Chenaran)."),
+    "dm_c_county": ("شهرستان", "County"), "dm_c_cities": ("شهرها (جمعیت)", "Towns (population)"),
+    "dm_c_urban": ("جمعیت شهری", "Urban population"), "dm_c_rural": ("جمعیت روستایی", "Rural population"),
+    "dm_c_upct": ("٪ شهری داخل محدوده", "% urban inside"), "dm_c_rpct": ("٪ روستایی داخل محدوده", "% rural inside"),
+    "dm_c_area": ("٪ مساحت داخل محدوده", "% of area inside"), "dm_c_basis": ("مبنای پیش‌فرض", "Default from"),
+    "dm_b_area": ("مساحت", "area"), "dm_b_data": ("آمار چاه‌ها", "well statistics"), "dm_b_config": ("پیکربندی", "config"),
+    "dm_cen_total": ("جمعیت داخل محدوده در سرشماری {y}: {p} نفر (کل جمعیت فایل سرشماری: {q} نفر).",
+                     "Population inside the area in the {y} census: {p} (whole census file: {q})."),
+    "dm_cen_sb": ("فقط بخشی از زیرحوضه‌ها انتخاب شده؛ جمعیت به نسبت برداشت شرب و خدمات زیرحوضه‌های انتخابی ({p}٪) حساب شد.",
+                  "Only some sub-basins are selected; the population is scaled by their share of drinking & services "
+                  "withdrawal ({p}%)."),
+    "dm_no_census": ("فایل سرشماری برای این حوضه تعریف نشده؛ نرخ‌های رشد روی شاخص نسبی جمعیت (سال پایه = ۱۰۰) اعمال می‌شود. "
+                     "برای جمعیت واقعی فایل سرشماری مرکز آمار را در بخش demand.census پیکربندی بگذارید.",
+                     "No census file is configured for this basin; the growth rates act on a relative population "
+                     "index (base year = 100). Add the Statistical Centre census file under demand.census in the "
+                     "basin config for real population figures."),
+    "dm_no_pop_sel": ("شهرستان‌های انتخاب‌شده در فایل سرشماری نیستند (مثلاً شهرستانی که بعد از سرشماری جدا شده)؛ "
+                      "نرخ رشد روی شاخص نسبی جمعیت اعمال شد.",
+                      "The selected counties are not in the census file (e.g. a county created after the census); "
+                      "the growth rates act on a relative population index."),
+    "ch_pop": ("جمعیت محدوده: سرشماری، برآورد سال‌های گذشته و پیش‌بینی آینده",
+               "Population of the area: census, past estimate and projection"),
+    "pop_past": ("جمعیت (سرشماری × نرخ رشد)", "Population (census × growth rate)"),
+    "pop_future": ("جمعیت آینده (باند = نرخ رشد ±)", "Future population (band = growth rate ±)"),
+    "pop_census": ("سرشماری {y}", "Census {y}"),
+    "pop_lcd": ("سرانه برداشت شرب و خدمات (لیتر/نفر/روز)", "Per-capita drinking & services withdrawal (l/person/day)"),
+    "dm_percap": ("تغییر سرانه شرب تا افق (٪)", "Change of per-capita drinking use by the horizon (%)"),
+    "dm_target_pct": ("هدف تعادل‌بخشی (٪ آب تجدیدپذیر)", "Rebalancing target (% of renewable water)"),
+    "dm_target_year": ("سال هدف تعادل‌بخشی", "Rebalancing target year"),
+    "dm_agri_floor": ("حداقل کشاورزی (٪ وضع موجود)", "Agriculture floor (% of today)"),
+    "dm_show_w": ("نمایش برداشت مشاهده‌شده", "Show observed withdrawal"),
+    "dm_summary": ("خلاصه در افق {y}", "Summary at the horizon {y}"),
+    "dm_col_scen": ("سناریو", "Scenario"), "dm_col_cons": ("مصرف", "Consumption"),
+    "dm_col_pct": ("٪ آب تجدیدپذیر", "% of renewable water"), "dm_col_bal": ("کنترل بیلان", "Balance check"),
+    "dm_reached": ("✅ تعادل‌بخشی در {y} به {p}٪ آب تجدیدپذیر می‌رسد.", "✅ Rebalancing reaches {p}% of renewable water in {y}."),
+    "dm_already": ("✅ مصرف همین حالا ({c}) کمتر از {p}٪ میانگین آب تجدیدپذیر ({r}) است؛ سناریو تعادل‌بخشی کاهشی لازم ندارد "
+                   "تا وقتی که رشد مصرف از این حد بگذرد.",
+                   "✅ Consumption today ({c}) is already below {p}% of the mean renewable water ({r}); rebalancing "
+                   "needs no cut until demand growth passes that level."),
+    "dm_not_reached": ("❌ با این فرض‌ها تعادل‌بخشی تا افق به {p}٪ آب تجدیدپذیر نمی‌رسد (حداقل کشاورزی مانع است).",
+                       "❌ With these assumptions rebalancing does not reach {p}% of renewable water by the horizon "
+                       "(the agriculture floor stops it)."),
+    "dm_note": ("فرض‌ها: نیاز شرب و خدمات با جمعیت (سرشماری × جدول نرخ رشد؛ باند = نرخ رشد ± عدم قطعیت) و تغییر سرانه رشد می‌کند، صنعت با نرخ خودش، "
+                "کشاورزی ثابت می‌ماند مگر در سناریو تعادل‌بخشی که به‌تدریج کم می‌شود تا مصرف به هدف برسد. سناریو بازنگری "
+                "اقدامات، روند خطی مصرف سال‌های گذشته (اثر اقدامات انجام‌شده) را با باند پیش‌بینی ادامه می‌دهد. آب "
+                "تجدیدپذیر آینده = میانگین سال‌های گذشته با باند تغییرات سالانه و خطای اندازه‌گیری. سال پایه = آخرین سال "
+                "آماری؛ برای گذشته، نیاز شرب با جمعیت هر سال برآورد و با مصرف مشاهده‌شده مقایسه شده است. نرخ‌های رشد، "
+                "سرانه، رشد صنعت و هدف‌ها فرض اولیه‌اند و باید با برنامه‌های واقعی جایگزین شوند.",
+                "Assumptions: drinking and services demand grow with population (census × growth-rate table; band = "
+                "growth rate ± its uncertainty) and the "
+                "per-capita change, industry with its own rate, agriculture stays constant except in the rebalancing "
+                "scenario where it is reduced step by step until consumption reaches the target. The review-of-"
+                "measures scenario continues the linear trend of past consumption (the effect of measures already "
+                "taken) with its prediction band. Future renewable water = mean of past years with a band from "
+                "year-to-year variability and measurement error. Base year = last statistics year; for past years "
+                "drinking demand is estimated from each year's population and compared with observed consumption. "
+                "Growth rates, per-capita change, industry growth and targets are starting assumptions to be "
+                "replaced with actual plans."),
     # charts
     "ch_sankey": ("جریان برداشت: از منبع تا کاربری", "Withdrawal flow: from source to use"),
     "ch_bar": ("برداشت هر کاربری به تفکیک نوع منبع", "Withdrawal of each use by source type"),

@@ -60,7 +60,10 @@ def _with_member(df, sel_uses, layout, sb_label):
     return pd.concat(parts, ignore_index=True) if parts else df.assign(member=pd.Series(dtype=object))
 
 
-def build_table(base, cfg, uses, W, RET, RES, year, sbs, counties, uses_sel, layout, groups_sel, restrict):
+def build_table(base, cfg, uses, W, RET, RES, year, sbs, counties, uses_sel, layout, groups_sel, restrict,
+                renewable=None):
+    """renewable: renewable water of the selection (Simaye Ab). If given, the balance check is
+    renewable - consumption; otherwise (Excel method) available volume of dams, groundwater, transfers - consumption."""
     sb_label = cfg["spatial"]["sub_basin_label"]
     sel_uses = [u for u in uses if u["name"] in uses_sel]
     coef = {u["name"]: float(u["return_coef"]) for u in uses}
@@ -138,7 +141,9 @@ def build_table(base, cfg, uses, W, RET, RES, year, sbs, counties, uses_sel, lay
     total_r = float(np.nansum([tot[c] for c in rcols]))
     consumption = float(np.nansum([cons[c] for c in wcols]))
     bal = pd.Series(np.nan, index=t.columns)
-    bal[G_COL] = resources - consumption
+    use_renew = renewable is not None and pd.notna(renewable)
+    balance = (float(renewable) if use_renew else resources) - consumption
+    bal[G_COL] = balance
     summary = pd.DataFrame([tot, cons, bal], index=pd.MultiIndex.from_tuples(
         [(SUMMARY, ROW_TOTAL), (SUMMARY, ROW_CONS), (SUMMARY, ROW_BAL)], names=t.index.names))
     t = pd.concat([t, summary])
@@ -146,7 +151,8 @@ def build_table(base, cfg, uses, W, RET, RES, year, sbs, counties, uses_sel, lay
     # withdrawals left out by the Excel-template member lists
     omitted = filt(W, year, sbs, counties, uses_sel).value.sum() - Wf.value.sum()
     totals = {"withdrawal": total_w, "return": total_r, "consumption": consumption,
-              "resources": resources, "balance": resources - consumption, "omitted": float(omitted)}
+              "resources": resources, "balance": balance, "balance_resources": resources - consumption,
+              "renewable": float(renewable) if use_renew else float("nan"), "omitted": float(omitted)}
     return t, totals
 
 

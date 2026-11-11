@@ -196,6 +196,17 @@ def read_regional(spec, around=None):
     return out
 
 
+def regional_county_names(spec):
+    """Names of every county in the country-wide layer (attributes only, fast)."""
+    if not spec or "counties" not in spec:
+        return set()
+    import pyogrio
+    s = spec["counties"]
+    df = pyogrio.read_dataframe(s["shapefile"], read_geometry=False)
+    nf = s.get("name_field") if s.get("name_field") in df else pick_field(df, COUNTY_NAME_HINTS, False, True)
+    return {norm(v) for v in auto_fix_names(list(df[nf].astype(str)), s.get("fix_encoding", "auto"))}
+
+
 def find_study_area(study_areas, key=None, sub_basins=None):
     """The basin's own study area: by code or name (`key`), else the one overlapping the sub-basins most."""
     if study_areas is None or study_areas.empty:

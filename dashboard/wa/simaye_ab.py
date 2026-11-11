@@ -77,6 +77,23 @@ def parse_page(page):
         ds_i = r + 4
     if ds_i < len(vals):
         out["delta_s_reported"] = vals[ds_i]
+    # rows around the renewable volume: rainfall depth / volume and ET above it; return flow and recharge
+    # from surface flow below it; after ΔS: [surface storage change], surface+transfer in/out, groundwater in/out
+    if r >= 2:
+        out["rain_volume"], out["et"] = vals[r - 2], vals[r - 1]
+    if r >= 3:
+        out["rain_depth"] = vals[r - 3]
+    if ds_i - 2 >= 0 and ds_i - 2 > r:
+        out["return_flow"], out["recharge_surface"] = vals[ds_i - 2], vals[ds_i - 1]
+    rest = vals[ds_i + 1:] if ds_i < len(vals) else []
+    # the table always ends with surface+transfer in/out and groundwater in/out; newer PDFs put the surface
+    # storage change first and some an extra row in between (evaporation from the reservoirs, 1402-03)
+    if len(rest) >= 4:
+        out["inflow"], out["outflow"], out["gw_in"], out["gw_out"] = rest[-4:]
+    if len(rest) >= 5:
+        out["delta_s_surface"] = rest[0]
+    if len(rest) >= 6:
+        out["reservoir_evap"] = rest[1]
     # transfer: number right after «شامل» (to its left on the same line, RTL)
     for w in words:
         if _clean(w["text"])[::-1] in INCLUDES or _clean(w["text"]) in INCLUDES:

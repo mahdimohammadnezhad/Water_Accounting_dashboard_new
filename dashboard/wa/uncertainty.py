@@ -22,10 +22,11 @@ def _q(a, level):
     return float(np.percentile(a, lo)), float(np.percentile(a, 100 - lo))
 
 
-def simulate(Wf, coef, res, ind, unc, seed=7):
+def simulate(Wf, coef, res, ind, unc, seed=7, balance="renewable"):
     """Wf: selected withdrawals (columns use, cls, value). coef: {use: return coef}.
     res: {"dam": x, "gw": x, "transfer": x} available volumes counted in the balance.
     ind: selection-scaled Simaye Ab terms {"renew_surface", "renew_ground", "nonrenewable"} or None.
+    balance: "renewable" (renewable − consumption) or "resources" (available volume − consumption).
     Returns a dict of sample arrays."""
     sd, n = unc["relative_sd"], int(unc.get("samples", 400))
     rng = np.random.default_rng(seed)
@@ -62,6 +63,8 @@ def simulate(Wf, coef, res, ind, unc, seed=7):
         rs = float(np.nan_to_num(ind.get("renew_surface", 0.0)))
         out.update(renew_surface=rs * f_rs, renew_ground=rg * f_rg, renew_total=rs * f_rs + rg * f_rg,
                    nonrenewable=nr * f_ds)
+        if balance == "renewable" and (rs + rg) > 0:
+            out["balance"] = out["renew_total"] - (w - r)
     return out
 
 

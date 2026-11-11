@@ -397,6 +397,8 @@ def load_simaye(cfg, report):
 
 # --------------------------------------------------------------------------- indicators
 IND_COLS = ["year", "renew_surface", "renew_ground", "renew_total", "nonrenewable", "gw_available"]
+BUDGET_COLS = ["rain_depth", "rain_volume", "et", "return_flow", "recharge_surface", "delta_s_surface",
+               "reservoir_evap", "inflow", "outflow", "gw_in", "gw_out"]
 
 
 def load_indicators(cfg, report, simaye=None):
@@ -409,6 +411,9 @@ def load_indicators(cfg, report, simaye=None):
                             "renew_ground": get("renew_ground"), "renew_total": get("renew_total"),
                             "nonrenewable": -get("delta_s"), "source": get("file")})
         out["gw_available"] = out.renew_ground.fillna(0) + out.nonrenewable.fillna(0)
+        # the other rows of the Simaye Ab balance table (for the water-budget view)
+        for c in BUDGET_COLS:
+            out[c] = get(c)
         return out
     frames = []
     if "renewable" in ind:

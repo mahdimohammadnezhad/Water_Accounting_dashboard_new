@@ -9,8 +9,10 @@ import pandas as pd
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent))
-from wa import charts, scenario, ui, uncertainty  # noqa: E402
+from wa import charts, demand, scenario, ui, uncertainty  # noqa: E402
+from wa.loaders import BUDGET_COLS  # noqa: E402
 from wa.build import get_base, is_fresh  # noqa: E402
+from wa.census import county_key  # noqa: E402
 from wa.config import GROUP_LABELS, GROUP_ORDER, list_configs, load_config, signature  # noqa: E402
 from wa.engine import compute, restrict_members  # noqa: E402
 from wa.i18n import LANGS, msg, num, t, term, year as fyear  # noqa: E402
@@ -52,15 +54,17 @@ def run_view(cfg_path, sig, mode, uses_json, scen_json=None, sel=None):
 
 @st.cache_data(show_spinner=False)
 def yearly_totals(cfg_path, sig, mode, uses_json, scen_json, sel, years, sbs, counties, uses_sel, layout, groups,
-                  restrict):
+                  restrict, share=1.0, bal_def="renewable"):
     cfg = load_config(cfg_path)
     base = load_base(cfg_path, sig)
     uses = json.loads(uses_json)
-    _, W, RET, RES = run_view(cfg_path, sig, mode, uses_json, scen_json, sel)
+    ind_v, W, RET, RES = run_view(cfg_path, sig, mode, uses_json, scen_json, sel)
+    renew = ind_v.set_index("year").renew_total * share if len(ind_v) else pd.Series(dtype=float)
     rows = {}
     for y in years:
         _, tot = build_table(base, cfg, uses, W, RET, RES, y, list(sbs), list(counties), list(uses_sel),
-                             layout, list(groups), restrict)
+                             layout, list(groups), restrict,
+                             renewable=renew.get(y) if bal_def == "renewable" else None)
         rows[y] = tot
     return pd.DataFrame(rows).T
 
@@ -175,6 +179,7 @@ with st.sidebar:
 
     side_section(T("sec_table"))
     layout = st.selectbox(T("layout"), list(LAYOUTS), format_func=lambda k: T(f"layout_{k}"))
+    bal_def = st.radio(T("bal_def"), ["renewable", "resources"], format_func=lambda k: T(f"bal_{k}"))
     restrict = False
     if layout == "excel" and any(u.get("members") for u in uses_cfg):
         restrict = st.checkbox(T("restrict"), value=True, help=T("restrict_help"))
@@ -229,20 +234,29 @@ if scen_on:
     ind_s, W_s, RET_s, RES_s = run_view(cfg_path, sig, mode, uses_json, scen_json, scen_sel)
 view_scen, view_sel = (scen_json, scen_sel) if global_on else (None, None)
 ind_df, W, RET, RES = (ind_s, W_s, RET_s, RES_s) if global_on else (ind_b, W_b, RET_b, RES_b)
-tbl, totals = build_table(base, cfg, uses_cfg, W, RET, RES, year, sbs, counties, uses_sel, layout, groups, restrict)
-
 cells = base["cells"]
 geo_counties = counties if mode == "geo" else [c for c in counties if c in set(cells.county)]
 share = float(cells[cells.sub_basin.isin(sbs) & cells.county.isin(geo_counties)].share.sum())
 
 
-def ind_year(ind_frame, y):
+def ind_year(ind_frame, y, cols=None):
+    """Simaye Ab values of year y scaled to the selected area (None if the year has no table)."""
     i = ind_frame.set_index("year") if len(ind_frame) else pd.DataFrame()
-    return i.loc[y, NUM_COLS].astype(float) * share if y in i.index else None
+    if y not in i.index:
+        return None
+    cols = [c for c in (cols or NUM_COLS) if c in i.columns]
+    return pd.to_numeric(i.loc[y, cols], errors="coerce") * share
+
+
+def renew_of(ind_frame, y):
+    iy = ind_year(ind_frame, y)
+    return iy.renew_total if bal_def == "renewable" and iy is not None and pd.notna(iy.renew_total) else None
 
 
 ind = ind_df.set_index("year") if len(ind_df) else pd.DataFrame()
 ind_y = ind_year(ind_df, year)
+tbl, totals = build_table(base, cfg, uses_cfg, W, RET, RES, year, sbs, counties, uses_sel, layout, groups, restrict,
+                          renewable=renew_of(ind_df, year))
 full_sb, full_ct = len(sbs) == len(all_sbs), len(counties) == len(all_counties)
 coef = {u["name"]: u["return_coef"] for u in uses_cfg}
 restrict_fn = lambda d: restrict_members(d, uses_cfg, restrict)  # noqa: E731
@@ -253,7 +267,7 @@ def unc_bands(W_, RES_, ind_frame, y):
     Wf, res = uncertainty.selection_inputs(W_, RES_, filt, y, sbs, counties, uses_sel, groups, restrict_fn,
                                            cfg["balance_source_groups"])
     iy = ind_year(ind_frame, y)
-    samples = uncertainty.simulate(Wf, coef, res, None if iy is None else iy.to_dict(), unc)
+    samples = uncertainty.simulate(Wf, coef, res, None if iy is None else iy.to_dict(), unc, balance=bal_def)
     return uncertainty.bands(samples, unc.get("level", 90))
 
 
@@ -274,16 +288,30 @@ unit = T("unit_short")
 if ind_y is not None and ind_y.notna().any():
     note = T("note_simaye", y=fyear(year, lang)) + ("" if share > 0.999 else
                                                     " — " + T("note_area", p=num(share * 100, lang, "{:.0f}")))
-    st.markdown(f"<div class='wa-sec-title'>{T('sec_resources')}</div>" + ui.cards([
-        {"label": T("renew_total"), "value": ind_y.renew_total, "color": "#0e7490", "icon": "🌧️", "note": note,
-         "band": B("renew_total")},
-        {"label": T("renew_surface"), "value": ind_y.renew_surface, "color": "#0284c7", "icon": "🏞️", "note": note,
-         "band": B("renew_surface")},
-        {"label": T("renew_ground"), "value": ind_y.renew_ground, "color": "#b45309", "icon": "💧", "note": note,
-         "band": B("renew_ground")},
-        {"label": T("nonrenew"), "value": ind_y.nonrenewable, "color": "#dc2626", "icon": "⚠️", "note": T("note_ds"),
-         "band": B("nonrenewable")},
-    ], lang, unit), unsafe_allow_html=True)
+    st.markdown(f"<div class='wa-sec-title'>{T('sec_resources')}</div>", unsafe_allow_html=True)
+    full = ind_year(ind_df, year, NUM_COLS + BUDGET_COLS)
+    cb1, cb2 = st.columns([2.3, 1], gap="medium")
+    with cb1:
+        f = lambda v: num(v, lang, "{:,.0f}")  # noqa: E731
+        if pd.notna(full.get("rain_volume", float("nan"))):
+            st.markdown(f"<div class='wa-note'>🌧️ {T('bud_rain', p=f(full.rain_volume), e=f(full.et), r=f(full.renew_total), s=f(full.renew_surface), g=f(full.renew_ground))}</div>",  # noqa: E501
+                        unsafe_allow_html=True)
+        st.plotly_chart(charts.water_budget(full.to_dict(), totals["consumption"], lang), width="stretch",
+                        config={"displayModeBar": False})
+        sa_cons = charts.budget_terms(full.to_dict())[1]["consumption"]
+        st.markdown(f"<div class='wa-note'>{T('bud_note', c=f(sa_cons), d=f(totals['consumption']), x=f(sa_cons - totals['consumption']))}</div>",  # noqa: E501
+                    unsafe_allow_html=True)
+    with cb2:
+        st.markdown(ui.cards([
+            {"label": T("renew_total"), "value": ind_y.renew_total, "color": "#0e7490", "icon": "🌧️", "note": note,
+             "band": B("renew_total")},
+            {"label": T("renew_surface"), "value": ind_y.renew_surface, "color": "#0284c7", "icon": "🏞️",
+             "band": B("renew_surface")},
+            {"label": T("renew_ground"), "value": ind_y.renew_ground, "color": "#b45309", "icon": "💧",
+             "band": B("renew_ground")},
+            {"label": T("nonrenew"), "value": ind_y.nonrenewable, "color": "#dc2626", "icon": "⚠️",
+             "note": T("note_ds"), "band": B("nonrenewable")},
+        ], lang, unit, cols=2), unsafe_allow_html=True)
 neg = totals["balance"] < 0
 st.markdown(f"<div class='wa-sec-title'>{T('sec_uses')}</div>" + ui.cards([
     {"label": T("withdrawal"), "value": totals["withdrawal"], "color": "#2563eb", "icon": "🚰",
@@ -293,11 +321,13 @@ st.markdown(f"<div class='wa-sec-title'>{T('sec_uses')}</div>" + ui.cards([
     {"label": T("consumption"), "value": totals["consumption"], "color": "#7c3aed", "icon": "🔥",
      "note": T("note_consumption"), "band": B("consumption")},
     {"label": T("balance"), "value": totals["balance"], "color": "#dc2626" if neg else "#059669", "icon": "⚖️",
-     "note": T("note_balance"), "tone": "neg" if neg else "pos", "band": B("balance")},
+     "note": T("note_balance_renew") if totals["renewable"] == totals["renewable"] else T("note_balance"),
+     "tone": "neg" if neg else "pos", "band": B("balance")},
 ], lang, unit), unsafe_allow_html=True)
 
-tab_map, tab_table, tab_charts, tab_trend, tab_matrix, tab_scen, tab_qc = st.tabs(
-    [T("tab_map"), T("tab_table"), T("tab_charts"), T("tab_trend"), T("tab_matrix"), T("tab_scen"), T("tab_qc")])
+tab_map, tab_table, tab_charts, tab_trend, tab_matrix, tab_scen, tab_demand, tab_qc = st.tabs(
+    [T("tab_map"), T("tab_table"), T("tab_charts"), T("tab_trend"), T("tab_matrix"), T("tab_scen"), T("tab_demand"),
+     T("tab_qc")])
 Wsel = restrict_fn(filt(W, year, sbs, counties, uses_sel))
 Wsel = Wsel[Wsel.source_group.isin(groups)]
 
@@ -315,6 +345,8 @@ with tab_table:
         st.markdown(f"<div class='wa-note'>📏 {T('table_bands', w=rng(bands['withdrawal']), r=rng(bands['return']), c=rng(bands['consumption']), s=rng(bands['resources']), b=rng(bands['balance']))}</div>",  # noqa: E501
                     unsafe_allow_html=True)
     st.markdown(f"<div class='wa-note'>{T('table_note')}</div>", unsafe_allow_html=True)
+    if bal_def == "renewable":
+        st.markdown(f"<div class='wa-note'>⚖️ {T('bal_table_note')}</div>", unsafe_allow_html=True)
     if share < 0.999 and ind_y is not None:
         st.caption(T("area_caption", p=num(share * 100, lang, "{:.1f}") + "%"))
     if restrict and totals["omitted"] > 1e-3:
@@ -347,13 +379,14 @@ with tab_charts:
 # ----------------------------------------------------------------------------- tab: trends
 with tab_trend:
     yt = yearly_totals(cfg_path, sig, mode, uses_json, view_scen, view_sel, tuple(years), tuple(sbs), tuple(counties),
-                       tuple(uses_sel), layout, tuple(groups), restrict)
+                       tuple(uses_sel), layout, tuple(groups), restrict, share, bal_def)
     yb = None
     if show_unc:
         rows = {}
         for y in years:
             b_ = unc_bands(W, RES, ind_df, y)
-            rows[y] = {f"{k}_{s}": b_[k][i] for k in ("withdrawal", "consumption", "resources", "balance")
+            rows[y] = {f"{k}_{s}": b_[k][i] for k in ("withdrawal", "consumption", "resources", "balance",
+                                                       "renew_total") if k in b_
                        for i, s in enumerate(("lo", "hi"))}
         yb = pd.DataFrame(rows).T
     Wall = restrict_fn(filt(W, None, sbs, counties, uses_sel))
@@ -361,7 +394,13 @@ with tab_trend:
     by = Wall.pivot_table(index="year", columns="use", values="value", aggfunc="sum").reindex(years).fillna(0)
     c1, c2 = st.columns(2)
     c1.plotly_chart(charts.trend_withdrawals(by, uses_all, lang, yb), width="stretch")
-    c2.plotly_chart(charts.trend_balance(yt, lang, yb), width="stretch")
+    with c2:
+        dep_pct = st.toggle(T("dep_pct"), key="dep_pct")
+        st.plotly_chart(charts.source_use_dependency(Wall, years, uses_all, lang, dep_pct), width="stretch")
+    pcts = st.multiselect(T("pct_select"), [p_ for p_ in range(10, 160, 5)], default=[100, 75], key="pcts",
+                          format_func=lambda v: f"{v}%")
+    renew_y = (ind.renew_total.astype(float) * share).reindex(years) if len(ind) else pd.Series(dtype=float)
+    st.plotly_chart(charts.trend_renewable(yt, yb, renew_y.dropna(), pcts or [100], lang), width="stretch")
     if len(ind):
         st.plotly_chart(charts.trend_indicators((ind[NUM_COLS].astype(float) * share).reset_index(), lang,
                                                 unc["relative_sd"] if show_unc else None), width="stretch")
@@ -488,9 +527,9 @@ with tab_scen:
             st.info(T("scen_none"))
         else:
             _, tot_b = build_table(base, cfg, uses_cfg, W_b, RET_b, RES_b, year, sbs, counties, uses_sel, layout,
-                                   groups, restrict)
+                                   groups, restrict, renewable=renew_of(ind_b, year))
             _, tot_s = build_table(base, cfg, uses_cfg, W_s, RET_s, RES_s, year, sbs, counties, uses_sel, layout,
-                                   groups, restrict)
+                                   groups, restrict, renewable=renew_of(ind_s, year))
             bs = unc_bands(W_s, RES_s, ind_s, year) if show_unc else {}
             ib, isc = ind_year(ind_b, year), ind_year(ind_s, year)
 
@@ -534,9 +573,9 @@ with tab_scen:
             st.plotly_chart(charts.scenario_uses(by_use(W_b), by_use(W_s), uses_all, lang,
                                                  bs.get("use_withdrawal") if bs else None), width="stretch")
             yt_b = yearly_totals(cfg_path, sig, mode, uses_json, None, None, tuple(years), tuple(sbs), tuple(counties),
-                                 tuple(uses_sel), layout, tuple(groups), restrict)
+                                 tuple(uses_sel), layout, tuple(groups), restrict, share, bal_def)
             yt_s = yearly_totals(cfg_path, sig, mode, uses_json, scen_json, scen_sel, tuple(years), tuple(sbs),
-                                 tuple(counties), tuple(uses_sel), layout, tuple(groups), restrict)
+                                 tuple(counties), tuple(uses_sel), layout, tuple(groups), restrict, share, bal_def)
             tr = pd.DataFrame(index=years)
             tr["balance_b"], tr["balance_s"] = yt_b["balance"], yt_s["balance"]
             dd = {y: deficit(y) for y in years}
@@ -570,6 +609,162 @@ with tab_scen:
             st.markdown(f"**{T('scen_table')}**")
             st.dataframe(shade(tb.style.format("{:,.2f}"), tb.columns[-1], None, diverging=True), width="stretch")
             st.markdown(f"<div class='wa-note'>{T('scen_note')}</div>", unsafe_allow_html=True)
+
+# ----------------------------------------------------------------------------- tab: water demand & future
+with tab_demand:
+    dcfg = {**demand.DEFAULTS, **(cfg.get("demand") or {})}
+    last = demand.year_start(years[-1])
+    cen = base.get("census")
+    cen_info = meta.get("census") or {}
+    has_cen = cen is not None and len(cen) > 0 and bool(cen_info)
+    cen_year = int(cen_info["year"]) if has_cen else None
+    NC = st.column_config.NumberColumn
+    st.markdown(f"<div class='wa-sec-title'>{T('dm_pop_sec')}</div>", unsafe_allow_html=True)
+    c_in, c_out = st.columns([1, 2.4], gap="medium")
+    box_cen = st.expander(T("dm_cen_box", y=num(cen_year, lang, "{}"))) if has_cen else None
+    box_par = st.expander(T("dm_params"))
+
+    # --- population growth rate (editable periods) + horizon
+    with c_in:
+        horizon = st.number_input(T("dm_horizon"), last + 1, last + 40,
+                                  min(max(int(dcfg["horizon"]), last + 1), last + 40), 1, key=f"dm_h_{bkey}")
+        st.markdown(f"**{T('dm_growth')}**")
+        g_df = st.data_editor(
+            pd.DataFrame(demand.growth_periods(dcfg, cen_year, last), columns=["from", "rate"]),
+            num_rows="dynamic", hide_index=True, width="stretch", key=f"dm_growth_{bkey}",
+            column_config={"from": NC(T("dm_g_from"), min_value=1300, max_value=1500, step=1, format="%d"),
+                           "rate": NC(T("dm_g_rate"), min_value=-5.0, max_value=10.0, step=0.05, format="%.2f")})
+        st.caption(T("dm_g_help"))
+        g_band = st.number_input(T("dm_g_band"), 0.0, 3.0, float(demand.growth_band(dcfg)), 0.1,
+                                 key=f"dm_gb_{bkey}", help=T("dm_g_band_help"))
+    growth = [(r["from"], r["rate"]) for _, r in g_df.iterrows() if pd.notna(r["from"]) and pd.notna(r["rate"])]
+
+    # --- other assumptions
+    with box_par:
+        d1, d2, d3 = st.columns(3)
+        dp = {
+            "horizon": horizon, "growth": growth or None, "growth_band": g_band,
+            "g_industry": d1.number_input(T("dm_g_industry"), -5.0, 10.0, float(dcfg["g_industry"]), 0.5,
+                                          key=f"dm_gi_{bkey}"),
+            "percap_change": d1.number_input(T("dm_percap"), -50.0, 50.0, float(dcfg["percap_change"]), 5.0,
+                                             key=f"dm_pc_{bkey}"),
+            "target_pct": d2.number_input(T("dm_target_pct"), 30.0, 150.0, float(dcfg["target_pct"]), 5.0,
+                                          key=f"dm_tp_{bkey}"),
+            "target_year": d2.number_input(T("dm_target_year"), last + 1, last + 40,
+                                           min(max(int(dcfg["target_year"]), last + 1), last + 40), 1,
+                                           key=f"dm_ty_{bkey}"),
+            "agri_floor": d3.number_input(T("dm_agri_floor"), 0.0, 100.0, float(dcfg["agri_floor"]), 5.0,
+                                          key=f"dm_af_{bkey}"),
+        }
+
+    # --- census population of the selection (county shares editable)
+    pop0, pop_msgs = None, []
+    if has_cen:
+        with box_cen:
+            st.caption(T("dm_cen_help"))
+            ce = pd.DataFrame({
+                "county": [L(c) + (f" ({L(n)})" if n != c else "") for c, n in zip(cen.county, cen.name)],
+                "urban": cen.urban.astype(float), "rural": cen.rural.astype(float),
+                "area": [f"{v:.1f}" if v == v else "—" for v in
+                         100 * cen.area_in_km2.astype(float) / cen.area_km2.astype(float)],
+                "urban_pct": cen.urban_pct.astype(float), "rural_pct": cen.rural_pct.astype(float),
+                "basis": [T(f"dm_b_{b}") for b in cen.basis], "cities": cen.cities})
+            ce_ed = st.data_editor(
+                ce, hide_index=True, width="stretch", key=f"dm_cen_{bkey}",
+                disabled=["county", "urban", "rural", "area", "basis", "cities"],
+                column_config={"county": st.column_config.TextColumn(T("dm_c_county")),
+                               "urban": NC(T("dm_c_urban"), format="localized"),
+                               "rural": NC(T("dm_c_rural"), format="localized"),
+                               "area": st.column_config.TextColumn(T("dm_c_area")),
+                               "urban_pct": NC(T("dm_c_upct"), min_value=0.0, max_value=100.0, step=1.0, format="%.0f"),
+                               "rural_pct": NC(T("dm_c_rpct"), min_value=0.0, max_value=100.0, step=0.1, format="%.1f"),
+                               "basis": st.column_config.TextColumn(T("dm_c_basis")),
+                               "cities": st.column_config.TextColumn(T("dm_c_cities"), width="large")})
+            inside = (cen.urban.astype(float).values * ce_ed.urban_pct.fillna(0).values
+                      + cen.rural.astype(float).values * ce_ed.rural_pct.fillna(0).values) / 100
+            st.markdown(f"<div class='wa-note'>{T('dm_cen_total', y=num(cen_year, lang, '{}'), p=num(inside.sum(), lang, '{:,.0f}'), q=num(cen_info['province_population'], lang, '{:,.0f}'))}</div>",  # noqa: E501
+                        unsafe_allow_html=True)
+        keep = pd.Series(True, index=cen.index)
+        if not full_ct:  # counties chosen in the sidebar (census names, or the names used in the data)
+            chosen = {county_key(c) for c in counties}
+            keep = cen.name.map(county_key).isin(chosen) | cen.county.map(county_key).isin(chosen)
+        pop_sel = float(inside[keep.values].sum())
+        if not full_sb and pop_sel > 0:  # part of the sub-basins: share of drinking & services withdrawal
+            pu = [u for u in uses_all if demand.use_kind(u) == "pop"]
+            Wp = restrict_fn(filt(W, years[-1], None, counties, pu))
+            Wp = Wp[Wp.source_group.isin(groups)]
+            tot_p = float(Wp.value.sum())
+            f_sb = float(Wp[Wp.sub_basin.isin(sbs)].value.sum()) / tot_p if tot_p > 0 else share
+            pop_sel *= f_sb
+            pop_msgs.append(T("dm_cen_sb", p=num(100 * f_sb, lang, "{:.0f}")))
+        if pop_sel > 0:
+            pop0 = pop_sel
+        else:
+            pop_msgs.append(T("dm_no_pop_sel"))
+    else:
+        pop_msgs.append(T("dm_no_census"))
+
+    # --- projection
+    Wd = restrict_fn(filt(W, None, sbs, counties, uses_sel))
+    Wd = Wd[Wd.source_group.isin(groups) & Wd.year.isin(years)]
+    hist = Wd.pivot_table(index="year", columns="use", values="value", aggfunc="sum").reindex(years).fillna(0)
+    renew_hist = (ind.renew_total.astype(float) * share).dropna() if len(ind) else pd.Series(dtype=float)
+    sdv = unc["relative_sd"]
+    sd_r = float(((sdv["renew_surface"] * ind.renew_surface.mean()) ** 2 + (sdv["renew_ground"] * ind.renew_ground.mean())
+                  ** 2) ** 0.5 / ind.renew_total.mean()) if len(ind) else 0.0
+    if hist.empty:
+        st.info(T("no_data"))
+    else:
+        dfp, summ = demand.project(hist, coef, renew_hist, sd_r, dp, pop0, cen_year)
+        with c_out:
+            hz = fyear(summ["horizon"], lang)
+            if summ["pop_absolute"]:
+                div, punit = charts.pop_scale(summ["pop_end"], lang)
+                pf = "{:,.2f}" if div == 1e6 else "{:,.0f}"
+                pcards = [
+                    {"label": T("dm_pop_cen", y=num(cen_year, lang, "{}")), "value": summ["pop_census"] / div,
+                     "fmt": pf, "unit": punit, "color": "#f59e0b", "icon": "📋", "note": T("dm_in_sel")},
+                    {"label": T("dm_pop_base", y=fyear(summ["base_year"], lang)), "value": summ["pop_base"] / div,
+                     "fmt": pf, "unit": punit, "color": "#86198f", "icon": "👥", "note": T("dm_from_rates")},
+                    {"label": T("dm_pop_end", y=hz), "value": summ["pop_end"] / div, "fmt": pf, "unit": punit,
+                     "color": "#c026d3", "icon": "🔮", "band": (summ["pop_end_lo"] / div, summ["pop_end_hi"] / div),
+                     "band_fmt": pf},
+                ]
+                if summ.get("percap"):
+                    pcards.append({"label": T("dm_lcd", y=fyear(summ["base_year"], lang)), "value": summ["percap"],
+                                   "fmt": "{:,.0f}", "unit": T("dm_lcd_unit"), "color": "#0d9488", "icon": "🚰"})
+            else:
+                pcards = [{"label": T("dm_pop_rel", y=hz), "value": 100 * summ["pop_end"] / summ["pop_base"],
+                           "fmt": "{:,.0f}", "unit": "", "color": "#c026d3", "icon": "🔮",
+                           "band": (100 * summ["pop_end_lo"] / summ["pop_base"],
+                                    100 * summ["pop_end_hi"] / summ["pop_base"])}]
+            st.markdown(ui.cards(pcards, lang, "", cols=4), unsafe_allow_html=True)
+            for m_ in pop_msgs:
+                st.markdown(f"<div class='wa-note'>ℹ️ {m_}</div>", unsafe_allow_html=True)
+            if summ["pop_absolute"]:
+                st.plotly_chart(charts.population_chart(dfp, summ, lang), width="stretch",
+                                config={"displayModeBar": False})
+        show_w = st.toggle(T("dm_show_w"), key="dm_show_w")
+        st.plotly_chart(charts.demand_chart(dfp, summ, lang, show_w), width="stretch")
+        if pd.notna(summ.get("target")) and summ.get("renew_mean", 0) > 0:
+            pct_lbl = num(dp["target_pct"], lang, "{:.0f}")
+            base_c = float(dfp.loc[summ["base_year"], "obs_consumption"])
+            if base_c <= summ["target"]:
+                st.success(T("dm_already", c=num(base_c, lang, "{:,.0f}"), p=pct_lbl,
+                             r=num(summ["renew_mean"], lang, "{:,.0f}")))
+            elif summ.get("reached_year"):
+                st.success(T("dm_reached", y=fyear(summ["reached_year"], lang), p=pct_lbl))
+            else:
+                st.warning(T("dm_not_reached", p=pct_lbl))
+            rows = []
+            for k in ("supply", "balance", "trend"):
+                if k in summ:
+                    rows.append({T("dm_col_scen"): T(f"dm_s_{k}"), T("dm_col_cons"): round(summ[k], 1),
+                                 T("dm_col_pct"): f"{100 * summ[k] / summ['renew_mean']:.0f}%",
+                                 T("dm_col_bal"): round(summ["renew_mean"] - summ[k], 1)})
+            st.markdown(f"**{T('dm_summary', y=hz)}**")
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+        st.markdown(f"<div class='wa-note'>{T('dm_note')}</div>", unsafe_allow_html=True)
 
 # ----------------------------------------------------------------------------- tab: QC
 with tab_qc:
