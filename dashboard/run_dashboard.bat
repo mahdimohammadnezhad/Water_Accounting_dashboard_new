@@ -14,4 +14,4 @@ if not exist "%USERPROFILE%\.streamlit\credentials.toml" (
     echo email = ""
   )
 )
-"..\.venv\Scripts\python.exe" -m streamlit run app.py
+"..\.venv\Scripts\python.exe" -m streamlit run manager.py

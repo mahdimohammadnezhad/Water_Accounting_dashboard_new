@@ -29,9 +29,35 @@ names. The sample Excel workbook is **not** used by the dashboard — only `vali
 results.
 
 ## Running
-Double-click `run_dashboard.bat` (or `..\.venv\Scripts\python.exe -m streamlit run app.py`), then open
-http://localhost:8501. The first run (and any run after an input file changes) rebuilds the processed data in
-about 10 seconds; after that every filter change takes under a second.
+This `management` branch has two dashboards on the same data and engine:
+
+| Version | Start | For |
+|---|---|---|
+| Management | `run_dashboard.bat` (or `..\.venv\Scripts\python.exe -m streamlit run manager.py`) | managers: the decision in three clicks |
+| Expert | `run_expert.bat` (or `..\.venv\Scripts\python.exe -m streamlit run app.py`) | analysts: every table, setting and uncertainty band |
+
+Then open http://localhost:8501. The first run (and any run after an input file changes) rebuilds the processed
+data in about 10 seconds; after that every filter change takes under a second.
+
+## Management dashboard
+Three controls only (water year, area = whole study area or one sub-basin, language) and four tabs. Every chart
+title states its finding, and every question is answered within three clicks:
+
+| Question | Where | Clicks |
+|---|---|---|
+| Is the aquifer being depleted this year, and by how much? Who consumes the water? | *Status*: red/green banner, 4 key numbers, 8-year trend, consumption by use | 0 |
+| Where is consumption concentrated? | *Areas*: map of consumption per area (mm/yr), ranking of sub-basins and counties | 1 |
+| Which management option stops the decline? | *Management options*: all options compared (mean of all years), best one named | 1 |
+| What does my own package achieve? | *Management options* → *Build your own package* → move a slider | 3 |
+| How much must consumption fall by the horizon? | *Outlook*: required cut, also as % of agricultural consumption | 1 |
+| …with another population growth or horizon? | *Outlook* → move a slider | 2 |
+
+Definitions used (first-order, `wa/mgmt.py`): consumption = withdrawal − return flow; aquifer storage loss = −ΔS of
+the Simaye Ab bulletin; *sustainable consumption* = mean consumption − mean aquifer storage loss over the record;
+*required cut* = consumption in the horizon year under business as usual (population and industry growth,
+agriculture constant) − sustainable consumption. Options are applied to every year and averaged; the aquifer effect
+uses the same rule as the expert scenarios (change in groundwater withdrawal, return flow and recharge). Defaults
+(growth rate, industry growth, horizon) come from `demand:` in the basin config.
 
 ## Dashboard pages
 | Tab | Content |
@@ -164,7 +190,8 @@ the engine reproduces DYNMIC cell by cell (only the aquifer areas differ slightl
 ## Folder structure
 ```
 dashboard/
-  app.py                 Streamlit interface (Persian / English)
+  manager.py             management dashboard (Persian / English) - run_dashboard.bat
+  app.py                 expert dashboard (Persian / English) - run_expert.bat
   new_basin.py           create a basin config from a data folder
   check_basin.py         health check of one or all basins
   validate_excel.py      comparison with the sample Excel's DYNMIC sheet
@@ -179,6 +206,7 @@ dashboard/
   wa/table.py            sources-and-uses table, conditional formatting, Excel export
   wa/uncertainty.py      Monte Carlo uncertainty bands
   wa/scenario.py         management scenarios
+  wa/mgmt.py             figures and numbers of the management dashboard
   wa/demand.py           population series and water-demand projections
   wa/census.py           population census reader, county shares inside the basin
   wa/charts.py, wa/ui.py charts, map, layout
