@@ -74,7 +74,31 @@ M = {
     "o_agri20": ("کاهش ۲۰٪ برداشت کشاورزی", "Cut irrigation abstraction by 20%"),
     "o_illegal": ("بستن همه چاه‌های غیرمجاز", "Close all illegal wells"),
     "o_reuse": ("مصرف ۵۰٪ پساب در کشاورزی", "Reuse 50% of effluent in agriculture"),
-    "o_combo": ("بسته ترکیبی: ۱۵٪ کشاورزی + نیمی از غیرمجاز + پساب", "Package: −15% irrigation + half of illegal + reuse"),
+    "o_combo": ("بسته ترکیبی: {x}", "Package: {x}"),
+    "p_agri": ("۱۵٪ کشاورزی", "−15% irrigation"), "p_illegal": ("نیمی از غیرمجاز", "half of illegal wells"),
+    "p_reuse": ("پساب", "effluent reuse"),
+    "opt_best_c": ("بیشترین کاهش مصرف را «{o}» دارد: از {b} به {a} میلیون مترمکعب در سال (سیمای آب برای محاسبه افت آبخوان نیست).",
+                   "“{o}” cuts consumption the most: from {b} to {a} million m³ per year (no Simaye Ab to compute the "
+                   "aquifer effect)."),
+    "opt_title_c": ("مصرف پس از هر گزینه (میانگین سال‌ها)", "Consumption after each option (mean of the years)"),
+    "opt_axis_c": ("مصرف (م.م.م در سال)", "Consumption (MCM/yr)"),
+    "badge_na": ("بدون داده", "No data"),
+    "trend_nod": ("مصرف و آب تجدیدپذیر در سال‌های گذشته", "Consumption and renewable water over the years"),
+    "f_lead_r": ("سیمای آب برای محاسبه افت آبخوان نیست؛ با ادامه وضع موجود مصرف {h} به {c} میلیون مترمکعب می‌رسد، برابر {p}٪ "
+                 "میانگین آب تجدیدپذیر.",
+                 "No Simaye Ab to compute the aquifer loss; under business as usual consumption reaches {c} million m³ "
+                 "by {h}, {p}% of the mean renewable water."),
+    "add_basin": ("افزودن محدوده مطالعاتی جدید", "Add a new study area"),
+    "add_help": ("پوشه داده‌های محدوده را بدهید (آمار چاه‌ها، آمار سدها، PDFهای سیمای آب، شیپ‌فایل‌ها و در صورت وجود فایل "
+                 "سرشماری). فایل‌ها و ستون‌ها خودکار شناسایی و پیکربندی محدوده ساخته می‌شود.",
+                 "Give the folder with the area's data (well statistics, dam statistics, Simaye Ab PDFs, shapefiles and, "
+                 "if available, the census file). Files and columns are detected and the area's configuration is written."),
+    "add_folder": ("مسیر پوشه داده‌ها", "Data folder"), "add_name": ("نام محدوده (اختیاری)", "Area name (optional)"),
+    "add_btn": ("شناسایی فایل‌ها و افزودن", "Detect files and add"),
+    "add_fail": ("افزودن ناموفق بود: {e}", "Could not add the area: {e}"),
+    "build_err": ("ساخت داده‌های این محدوده ناموفق بود: {e}", "Building this area's data failed: {e}"),
+    "no_cfg": ("هنوز هیچ محدوده‌ای تعریف نشده است؛ از بخش زیر یک محدوده اضافه کنید.",
+               "No study area is configured yet; add one below."),
     "o_drought": ("ریسک: خشکسالی (۳۰٪ آب کمتر)", "Risk: drought (30% less water)"),
     "o_custom": ("بسته دلخواه", "Your package"),
     "opt_stop": ("«{o}» افت آبخوان را متوقف می‌کند: به‌جای افت {b} میلیون مترمکعب در سال، ذخیره آبخوان حدود {a} "
@@ -136,7 +160,19 @@ def T(key, **kw):
 
 
 L = lambda s: term(s, lang)  # noqa: E731
-N = lambda v, f="{:,.0f}": num(v, lang, f)  # noqa: E731
+
+
+def _nan(v):
+    return v is None or (isinstance(v, (float, np.floating)) and np.isnan(v))
+
+
+def N(v, f="{:,.0f}"):
+    return "—" if _nan(v) else num(v, lang, f)
+
+
+def cards(items):
+    """ui.cards with missing values shown as a dash."""
+    return ui.cards([{**it, "value": None if _nan(it.get("value")) else it["value"]} for it in items], lang, T("unit"))
 
 st.markdown(ui.css(lang) + """
 <style>
@@ -144,6 +180,8 @@ st.markdown(ui.css(lang) + """
              padding: 14px 20px; margin: 2px 0 14px 0; }
 .mg-status.bad { background: #fef2f2; border-color: #fecaca; color: #7f1d1d; }
 .mg-status.good { background: #ecfdf5; border-color: #a7f3d0; color: #064e3b; }
+.mg-status.na { background: #f8fafc; border-color: #e2e8f0; color: #334155; }
+.mg-status.na .badge { background: #64748b; }
 .mg-status .badge { flex: 0 0 auto; color: #fff; font-weight: 800; border-radius: 999px; padding: 3px 14px;
                     font-size: .85rem; margin-top: 6px; }
 .mg-status.bad .badge { background: #b91c1c; } .mg-status.good .badge { background: #047857; }
@@ -209,9 +247,35 @@ def thaw(x):
     return {k: thaw(v) for k, v in x} if isinstance(x, tuple) else x
 
 
-cfgs = {str(p): load_config(p) for p in list_configs()}
+def add_basin_panel():
+    """Add another study area from a data folder (same automatic detection as the expert dashboard)."""
+    with st.expander(T("add_basin"), icon=":material/create_new_folder:"):
+        st.caption(T("add_help"))
+        folder = st.text_input(T("add_folder"), placeholder=r"D:\data\Neyshabur", key="add_folder")
+        name = st.text_input(T("add_name"), key="add_name")
+        if st.button(T("add_btn"), type="primary", disabled=not folder):
+            from wa.detect import scan, slug, write_config
+            f = folder.strip().strip('"')
+            try:
+                with st.spinner(T("building")):
+                    cfg_new, notes = scan(f, name=name or None, log=lambda *_: None)
+                    path = write_config(cfg_new, f, slug(Path(f).name))
+                ss["basin_pick"] = str(path)
+                st.cache_data.clear()
+                st.rerun()
+            except Exception as e:  # noqa: BLE001
+                st.error(T("add_fail", e=e))
+
+
+cfgs = {}
+for _p in list_configs():
+    try:
+        cfgs[str(_p)] = load_config(_p)
+    except Exception as e:  # noqa: BLE001
+        st.warning(f"{Path(_p).name}: {e}")
 if not cfgs:
-    st.error("No basin configuration in configs/.")
+    st.info(T("no_cfg"))
+    add_basin_panel()
     st.stop()
 
 
@@ -224,24 +288,38 @@ head = st.container()
 cols = st.columns([1.4, 1, 1.4, 1] if len(cfgs) > 1 else [1, 1.4, 1])
 i0 = 0
 if len(cfgs) > 1:
-    cfg_path = cols[0].selectbox(T("basin"), list(cfgs), format_func=lambda p: basin_name(cfgs[p]))
+    if ss.get("basin_pick") in cfgs:  # a basin was just added: show it
+        ss["basin_sel"] = ss.pop("basin_pick")
+    if ss.get("basin_sel") not in cfgs:
+        ss.pop("basin_sel", None)
+    # stable keys: the selections survive a change of language (labels change, keys do not)
+    cfg_path = cols[0].selectbox(T("basin"), list(cfgs), format_func=lambda p: basin_name(cfgs[p]), key="basin_sel")
     i0 = 1
 else:
     cfg_path = next(iter(cfgs))
 cfg = cfgs[cfg_path]
-sig = signature(cfg)
-if not is_fresh(cfg):
-    with st.spinner(T("building")):
-        load(cfg_path, sig, force=True)
-base = load(cfg_path, sig)
-meta = base["meta"]
-years = meta["years"]
-W, RET, mode = engine(cfg_path, sig)
-year = cols[i0].selectbox(T("year"), years, index=len(years) - 1, format_func=lambda y: fyear(y, lang))
+bkey = cfg["basin"]["key"]
+try:
+    sig = signature(cfg)
+    if not is_fresh(cfg):
+        with st.spinner(T("building")):
+            load(cfg_path, sig, force=True)
+    base = load(cfg_path, sig)
+    meta = base["meta"]
+    years = meta["years"]
+    if not years:
+        raise ValueError("no water year could be read")
+    W, RET, mode = engine(cfg_path, sig)
+except Exception as e:  # noqa: BLE001
+    st.error(T("build_err", e=e))
+    add_basin_panel()
+    st.stop()
+year = cols[i0].selectbox(T("year"), years, index=len(years) - 1, format_func=lambda y: fyear(y, lang),
+                          key=f"year_{bkey}")
 sb_label = cfg["spatial"]["sub_basin_label"]
 sb_names = {s: L(sb_label.format(id=s)) for s in meta["sub_basins"]}
 area = cols[i0 + 1].selectbox(T("area"), ["all"] + meta["sub_basins"],
-                              format_func=lambda a: T("area_all") if a == "all" else sb_names[a])
+                              format_func=lambda a: T("area_all") if a == "all" else sb_names[a], key=f"area_{bkey}")
 cols[i0 + 2].radio(T("lang"), list(LANGS), format_func=LANGS.get, horizontal=True, key="lang")
 sbs = None if area == "all" else (area,)
 share = mgmt.area_share(base["cells"], sbs)
@@ -263,7 +341,7 @@ with tab_s:
         bad = row.deficit > 0
         big = T("st_bad", y=fyear(year, lang), d=N(row.deficit)) if bad else T("st_good", y=fyear(year, lang))
     else:
-        bad = pd.notna(row.renewable) and row.consumption > row.renewable
+        bad = None
         big = T("st_nodata")
     small = []
     if pd.notna(row.renewable) and row.renewable > 0:
@@ -271,8 +349,9 @@ with tab_s:
                        r=N(row.renewable)))
     if n_years:
         small.append(T("st_years", n=N(loss_years, "{}"), m=N(n_years, "{}")))
-    st.markdown(f"<div class='mg-status {'bad' if bad else 'good'}'><span class='badge'>"
-                f"{T('badge_bad') if bad else T('badge_good')}</span><div><div class='big'>{big}</div>"
+    kind, badge = (("na", T("badge_na")) if bad is None else ("bad", T("badge_bad")) if bad else
+                   ("good", T("badge_good")))
+    st.markdown(f"<div class='mg-status {kind}'><span class='badge'>{badge}</span><div><div class='big'>{big}</div>"
                 f"<div class='small'>{' '.join(small)}</div></div></div>", unsafe_allow_html=True)
     if have_d and row.deficit > 0 and pd.notna(row.renewable) and row.consumption < row.renewable:
         st.markdown(f"<div class='mg-tip'>{T('gap')}</div>", unsafe_allow_html=True)
@@ -280,22 +359,23 @@ with tab_s:
     by_use = mgmt.consumption_by_use(W, RET, list(sbs) if sbs else None, year)
     agri = sum(v for u, v in by_use.items() if demand.use_kind(u) == "agri")
     tot_u = float(by_use.sum()) or 1.0
-    st.markdown(ui.cards([
+    st.markdown(cards([
         {"label": T("k_renew"), "value": row.renewable, "color": "#0891b2", "fmt": "{:,.0f}",
-         "note": T("k_renew_n", n=N(yr.renewable.notna().sum(), "{}"), m=N(yr.renewable.mean()))},
+         "note": T("k_renew_n", n=N(yr.renewable.notna().sum(), "{}"), m=N(yr.renewable.mean()))
+         if yr.renewable.notna().any() else ""},
         {"label": T("k_cons"), "value": row.consumption, "color": "#1d4ed8", "fmt": "{:,.0f}",
          "note": T("k_cons_n", p=N(100 * row.consumption / row.renewable)) if row.renewable and
          pd.notna(row.renewable) else ""},
         {"label": T("k_def"), "value": row.deficit if have_d else None, "color": "#dc2626", "fmt": "{:,.0f}",
-         "tone": "neg" if have_d and row.deficit > 0 else "", "note": T("k_def_n", n=N(n_years, "{}"),
-                                                                       s=N(yr.deficit.sum()))},
+         "tone": "neg" if have_d and row.deficit > 0 else "",
+         "note": T("k_def_n", n=N(n_years, "{}"), s=N(yr.deficit.sum())) if n_years else ""},
         {"label": T("k_agri"), "value": 100 * agri / tot_u, "color": "#d97706", "fmt": "{:.0f}", "unit": T("pct"),
          "note": T("k_agri_n", v=N(agri))},
-    ], lang, unit), unsafe_allow_html=True)
+    ]), unsafe_allow_html=True)
 
     c1, c2 = st.columns([1.5, 1], gap="medium")
-    trend_title = (T("trend_all", m=N(n_years, "{}")) if loss_years == n_years else
-                   T("trend_some", n=N(loss_years, "{}"), m=N(n_years, "{}")))
+    trend_title = (T("trend_nod") if not n_years else T("trend_all", m=N(n_years, "{}")) if loss_years == n_years
+                   else T("trend_some", n=N(loss_years, "{}"), m=N(n_years, "{}")))
     c1.plotly_chart(mgmt.trend_fig(yr, lang, trend_title, {"deficit": T("lbl_def"), "renewable": T("lbl_renew"),
                                                            "consumption": T("lbl_cons"), "unit": T("lbl_unit")}),
                     width="stretch", config={"displayModeBar": False})
@@ -326,54 +406,82 @@ with tab_a:
 
 # ----------------------------------------------------------------------------- management options
 AGRI_USE = next((u["name"] for u in meta["uses"] if demand.use_kind(u["name"]) == "agri"), None)
-PRESETS = {"agri20": {"use_pct": {AGRI_USE: -20}} if AGRI_USE else {}, "illegal": {"illegal_close": 100},
-           "reuse": {"reuse_pct": 50},
-           "combo": {**({"use_pct": {AGRI_USE: -15}} if AGRI_USE else {}), "illegal_close": 50, "reuse_pct": 50},
-           "drought": {"climate_pct": -30}}
+HAS_ILLEGAL = bool((base["W"].get("cls", pd.Series(dtype=object)) == "gw_i").any())
+HAS_REUSE = bool(AGRI_USE) and any(u.get("treatment_fraction") for u in meta["uses"])
+PRESETS, combo, parts = {}, {}, []
+if AGRI_USE:
+    PRESETS["agri20"] = {"use_pct": {AGRI_USE: -20}}
+    combo["use_pct"] = {AGRI_USE: -15}
+    parts.append(T("p_agri"))
+if HAS_ILLEGAL:
+    PRESETS["illegal"] = {"illegal_close": 100}
+    combo["illegal_close"] = 50
+    parts.append(T("p_illegal"))
+if HAS_REUSE:
+    PRESETS["reuse"] = {"reuse_pct": 50}
+    combo["reuse_pct"] = 50
+    parts.append(T("p_reuse"))
+if len(combo) >= 2:
+    PRESETS["combo"] = combo
+PRESETS["drought"] = {"climate_pct": -30}
 with tab_o:
     tab = option_table(cfg_path, sig, PRESETS, sbs, share)
-    names = {k: T(f"o_{k}") for k in ["base", *PRESETS]}
+    names = {k: T(f"o_{k}") if k != "combo" else T("o_combo", x=" + ".join(parts)) for k in ["base", *PRESETS]}
+    names["custom"] = T("o_custom")
     b = float(tab.loc["base", "deficit"])
-    if pd.isna(b):
-        st.info(T("st_nodata"))
-    else:
-        dec = tab.drop(index=["base", "drought"], errors="ignore").sort_values("deficit")
+    metric = "consumption" if pd.isna(b) else "deficit"
+    dec = tab.drop(index=["base", "drought"], errors="ignore").sort_values(metric)
+    if len(dec):
         best = dec.index[0]
-        a = float(dec.loc[best, "deficit"])
-        lead = (T("opt_stop", o=names[best], b=N(b), a=N(-a)) if a <= 0 else
-                T("opt_best", o=names[best], p=N(dec.loc[best, "cut_pct"]), b=N(b), a=N(a)))
+        a = float(dec.loc[best, metric])
+        if metric == "consumption":
+            lead = T("opt_best_c", o=names[best], b=N(tab.loc["base", "consumption"]), a=N(a))
+        else:
+            lead = (T("opt_stop", o=names[best], b=N(b), a=N(-a)) if a <= 0 else
+                    T("opt_best", o=names[best], p=N(dec.loc[best, "cut_pct"]), b=N(b), a=N(a)))
         st.markdown(f"<div class='mg-lead'>{lead}</div>", unsafe_allow_html=True)
-        c1, c2 = st.columns([1.6, 1], gap="medium")
-        c1.plotly_chart(mgmt.options_fig(tab, names, lang, T("opt_title"),
-                                         {"deficit": T("lbl_def"), "now": T("opt_now"), "axis": T("opt_axis")}),
-                        width="stretch", config={"displayModeBar": False})
+    c1, c2 = st.columns([1.6, 1], gap="medium")
+    lab = ({"deficit": T("lbl_def"), "now": T("opt_now"), "axis": T("opt_axis")} if metric == "deficit" else
+           {"deficit": T("lbl_cons"), "now": T("opt_now"), "axis": T("opt_axis_c")})
+    c1.plotly_chart(mgmt.options_fig(tab, names, lang, T("opt_title") if metric == "deficit" else T("opt_title_c"),
+                                     lab, metric=metric), width="stretch", config={"displayModeBar": False})
+    if AGRI_USE or HAS_ILLEGAL or HAS_REUSE:
         with c2.expander(T("custom"), icon=":material/build:", expanded=False):
-            ca = st.slider(T("cu_agri"), 0, 50, 15, 5, key="cu_agri", format="%d%%")
-            ci = st.slider(T("cu_illegal"), 0, 100, 50, 10, key="cu_illegal", format="%d%%")
-            cr = st.slider(T("cu_reuse"), 0, 100, 50, 10, key="cu_reuse", format="%d%%")
-            spec = {"custom": {**({"use_pct": {AGRI_USE: -ca}} if AGRI_USE and ca else {}), "illegal_close": ci,
-                               "reuse_pct": cr}}
-            ctab = option_table(cfg_path, sig, spec, sbs, share)
-            ac = float(ctab.loc["custom", "deficit"])
-            msg = (T("cu_gain", a=N(-ac), b=N(b)) if ac <= 0 else
-                   T("cu_result", a=N(ac), p=N(ctab.loc["custom", "cut_pct"])))
+            spec = {}
+            if AGRI_USE:
+                ca = st.slider(T("cu_agri"), 0, 50, 15, 5, key=f"cu_agri_{bkey}", format="%d%%")
+                if ca:
+                    spec["use_pct"] = {AGRI_USE: -ca}
+            if HAS_ILLEGAL:
+                spec["illegal_close"] = st.slider(T("cu_illegal"), 0, 100, 50, 10, key=f"cu_illegal_{bkey}", format="%d%%")
+            if HAS_REUSE:
+                spec["reuse_pct"] = st.slider(T("cu_reuse"), 0, 100, 50, 10, key=f"cu_reuse_{bkey}", format="%d%%")
+            ctab = option_table(cfg_path, sig, {"custom": spec}, sbs, share)
+            ac = float(ctab.loc["custom", metric])
+            if metric == "consumption":
+                msg = T("opt_best_c", o=names["custom"], b=N(tab.loc["base", "consumption"]), a=N(ac))
+            else:
+                msg = (T("cu_gain", a=N(-ac), b=N(b)) if ac <= 0 else
+                       T("cu_result", a=N(ac), p=N(ctab.loc["custom", "cut_pct"])))
             st.markdown(f"<div class='mg-lead'>{msg}</div>", unsafe_allow_html=True)
 
-        def cut_text(k, v):
-            if k == "base" or pd.isna(v):
-                return "—"
-            if v < 0:
-                return T("cut_more", p=N(-v))
-            return T("cut_rec", p=N(v)) if v > 100 else f"{N(v)}{T('pct')}"
+    def cut_text(k, v):
+        if k == "base" or pd.isna(v):
+            return "—"
+        if v < 0:
+            return T("cut_more", p=N(-v))
+        return T("cut_rec", p=N(v)) if v > 100 else f"{N(v)}{T('pct')}"
 
-        show = tab.loc[["base", *[k for k in tab.index if k != "base"]]]
-        st.dataframe(pd.DataFrame({
-            T("c_option"): [names[k] for k in show.index],
-            T("c_def"): show.deficit.round(0),
-            T("c_cut"): [cut_text(k, v) for k, v in show.cut_pct.items()],
-            T("c_years"): [f"{N(v, '{}')} / {N(len(years), '{}')}" for v in show.years_loss]}),
-            hide_index=True, width="stretch")
-        st.caption(T("opt_note", y1=fyear(years[0], lang), y2=fyear(years[-1], lang)))
+    show = tab.loc[["base", *[k for k in tab.index if k != "base"]]]
+    table = {T("c_option"): [names[k] for k in show.index]}
+    if metric == "deficit":
+        table.update({T("c_def"): show.deficit.round(0),
+                      T("c_cut"): [cut_text(k, v) for k, v in show.cut_pct.items()],
+                      T("c_years"): [f"{N(v, '{}')} / {N(len(years), '{}')}" for v in show.years_loss]})
+    else:
+        table[T("c_cons")] = show.consumption.round(0)
+    st.dataframe(pd.DataFrame(table), hide_index=True, width="stretch")
+    st.caption(T("opt_note", y1=fyear(years[0], lang), y2=fyear(years[-1], lang)))
 
 # ----------------------------------------------------------------------------- outlook
 with tab_f:
@@ -381,31 +489,36 @@ with tab_f:
     y0 = demand.year_start(years[-1])
     periods = demand.growth_periods(dcfg, None, y0)
     c1, c2, _ = st.columns([1.2, 1.4, 1.4])
-    rate = c1.slider(T("f_rate"), 0.0, 3.0, float(periods[-1][1]), 0.1, key="f_rate")
+    rate = c1.slider(T("f_rate"), 0.0, 3.0, float(periods[-1][1]), 0.1, key=f"f_rate_{bkey}")
     hz_opts = list(range(y0 + 3, y0 + 29, 1))
     horizon = c2.select_slider(T("f_h"), hz_opts, value=min(max(int(dcfg["horizon"]), hz_opts[0]), hz_opts[-1]),
-                               key="f_h")
+                               key=f"f_h_{bkey}")
     dfp, summ = outlook(cfg_path, sig, sbs, share, rate, horizon)
     hz = fyear(summ["horizon"], lang)
+    lead = None
     if pd.notna(summ.get("sustainable")) and pd.notna(summ.get("supply")):
         lead = (T("f_lead", h=hz, c=N(summ["cut"]), p=N(summ["cut_pct_agri"])) if summ["cut"] > 0 else
                 T("f_ok", h=hz, s=N(summ["sustainable"])))
+    elif pd.notna(summ.get("supply")) and pd.notna(summ.get("renew_mean")) and summ["renew_mean"] > 0:
+        lead = T("f_lead_r", h=hz, c=N(summ["supply"]), p=N(100 * summ["supply"] / summ["renew_mean"]))
+    if lead:
         st.markdown(f"<div class='mg-lead'>{lead}</div>", unsafe_allow_html=True)
     base_c = float(dfp.loc[summ["base_year"], "obs_consumption"])
-    cards = []
+    pcards = []
     if summ["pop_absolute"]:
-        cards.append({"label": T("f_pop", y=hz), "value": summ["pop_end"] / 1e6, "fmt": "{:,.2f}",
+        pcards.append({"label": T("f_pop", y=hz), "value": summ["pop_end"] / 1e6, "fmt": "{:,.2f}",
                       "unit": T("mpeople"), "color": "#7c3aed",
                       "note": T("f_pop_n", y=fyear(summ["base_year"], lang), v=N(summ["pop_base"] / 1e6, "{:,.2f}"))})
-    cards += [
+    pcards += [
         {"label": T("f_cons", y=hz), "value": summ.get("supply", np.nan), "fmt": "{:,.0f}", "color": "#1d4ed8",
          "note": T("f_cons_n", v=N(base_c))},
         {"label": T("f_sust"), "value": summ["sustainable"], "fmt": "{:,.0f}", "color": "#059669",
          "note": T("f_sust_n")},
         {"label": T("f_cut", y=hz), "value": summ["cut"], "fmt": "{:,.0f}", "color": "#dc2626",
-         "tone": "neg" if summ["cut"] > 0 else "pos", "note": T("f_cut_n", p=N(summ["cut_pct_agri"]))},
+         "tone": "neg" if not _nan(summ["cut"]) and summ["cut"] > 0 else "pos",
+         "note": T("f_cut_n", p=N(summ["cut_pct_agri"])) if not _nan(summ["cut_pct_agri"]) else ""},
     ]
-    st.markdown(ui.cards(cards, lang, unit), unsafe_allow_html=True)
+    st.markdown(cards(pcards), unsafe_allow_html=True)
     if not summ["pop_absolute"]:
         st.caption(T("f_nopop"))
     st.plotly_chart(mgmt.outlook_fig(dfp, summ, lang, T("f_title"),
@@ -415,3 +528,4 @@ with tab_f:
     st.caption(T("f_note", g=N(dcfg["g_industry"], "{:g}"), b=N(demand.growth_band(dcfg), "{:g}")))
 
 st.caption(T("expert"))
+add_basin_panel()

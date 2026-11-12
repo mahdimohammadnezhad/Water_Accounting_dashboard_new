@@ -237,22 +237,26 @@ def map_fig(shapes, sb, lang, names, unit):
     return fig
 
 
-def options_fig(tab, names, lang, title, labels, risk_key="drought"):
-    """Remaining mean aquifer deficit for each option (bars) against the present situation (line)."""
-    t = tab.drop(index="base").sort_values("deficit")
-    base = float(tab.loc["base", "deficit"])
+def options_fig(tab, names, lang, title, labels, risk_key="drought", metric="deficit"):
+    """Mean value of `metric` after each option (bars) against the present situation (line). metric = "deficit"
+    (aquifer storage loss; green when it turns into a gain) or "consumption" (basins without Simaye Ab)."""
+    t = tab.drop(index="base").sort_values(metric)
+    base = float(tab.loc["base", metric])
     ys = [names[k] for k in t.index]
-    colors = ["#94a3b8" if k == risk_key else (GOOD if v <= 0 else _rgba(DEF, 0.75)) for k, v in t.deficit.items()]
-    text = [num(v, lang, "{:+,.0f}" if v < 0 else "{:,.0f}") for v in t.deficit]
-    fig = go.Figure(go.Bar(x=t.deficit, y=ys, orientation="h", marker_color=colors, text=text, textposition="outside",
+    if metric == "deficit":
+        colors = ["#94a3b8" if k == risk_key else (GOOD if v <= 0 else _rgba(DEF, 0.75)) for k, v in t[metric].items()]
+    else:
+        colors = ["#94a3b8" if k == risk_key else CONS for k in t.index]
+    text = [num(v, lang, "{:+,.0f}" if v < 0 else "{:,.0f}") for v in t[metric]]
+    fig = go.Figure(go.Bar(x=t[metric], y=ys, orientation="h", marker_color=colors, text=text, textposition="outside",
                            cliponaxis=False, hovertemplate="%{y}<br>" + labels["deficit"] + ": %{x:,.1f}<extra></extra>"))
     fig.add_vline(x=base, line_dash="dash", line_color="#334155", line_width=1.5)
     fig.add_vline(x=0, line_color="#64748b", line_width=1)
     fig.add_annotation(x=base, y=1.02, yref="paper", text=labels["now"], showarrow=False, yanchor="bottom",
                        font=dict(size=12, color="#334155"))
     _layout(fig, lang, h=360, title=title, showlegend=False)
-    lo = min(0.0, float(t.deficit.min())) * 1.3 - 5
-    hi = max(base, float(t.deficit.max())) * 1.25
+    lo = min(0.0, float(t[metric].min())) * 1.3 - 5
+    hi = max(base, float(t[metric].max())) * 1.25
     fig.update_xaxes(title=labels["axis"], range=[hi, lo] if lang == "fa" else [lo, hi])
     fig.update_yaxes(autorange="reversed", side="right" if lang == "fa" else "left")
     return fig

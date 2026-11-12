@@ -59,6 +59,13 @@ agriculture constant) − sustainable consumption. Options are applied to every 
 uses the same rule as the expert scenarios (change in groundwater withdrawal, return flow and recharge). Defaults
 (growth rate, industry growth, horizon) come from `demand:` in the basin config.
 
+Other basins work the same way as in the expert version: every `configs/*.yaml` appears in a basin selector at
+the top, and *Add a new study area* at the bottom of the page scans a data folder and writes the config. The
+management view adapts to what a basin has: options without data are hidden (closing illegal wells needs the
+legal-status column of the well statistics, effluent reuse needs a `treatment_fraction`), the combined package is
+built from the available parts, and without a Simaye Ab bulletin the status shows *no data*, the options are
+compared by consumption and the outlook by renewable water.
+
 ## Dashboard pages
 | Tab | Content |
 |---|---|
